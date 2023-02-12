@@ -1,6 +1,18 @@
 # Solar System
 
-This is an n-body simulation of the Solar System.
+This is an $N$-body simulation of the Solar System.
+
+This is a first-persion view of the Solar System from Earth displaying the Moon, the Sun, and the
+other seven planets. The Earth is looking directly at the Solar System's center of mass. This
+direction forms the $\mathbf{\hat{z}}$ axis. The horizontal or $\mathbf{\hat{x}}$ axis is aligned so
+that the span of $\mathbf{\hat{x}}$ and $\mathbf{\hat{z}}$ forms the ecliptic plane. The vertical or
+$\mathbf{\hat{y}}$ axis is aligned so that the Earth orbits the Sun counterclockwise from the
+perspective of an observer positioned on the positive $\mathbf{\hat{y}}$ axis looking towards the
+origin.
+
+This simulation isn't real-time. It's not even accurate. It's an $N$-body gravitational simulation.
+The Sun starts out at the origin at rest. All of the planets and the Moon start at their approximate
+real positions on 2023/01/01.
 
 ## Future work
 
