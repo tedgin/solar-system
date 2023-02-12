@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8"/>
+		<title>Solar System Simulation</title>
+		<style>
+			html, body {
+				height: 100%;
+				width: 100%;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			h1 {
+				text-align: center;
+			}
+
+			#canvas {
+				z-index: 0;
+				height: 100%;
+				width: 100%;
+			}
+
+			#description {
+				z-index: 1;
+				position: absolute;
+				top: 0px;
+				padding: 2em;
+				color: white;
+			}
+		</style>
+	</head>
+	<body>
+		<canvas id="canvas"></canvas>
+		<div id="description">
+			<h1>The Solar System from Earth</h1>
+			<p>
+				This is a first-persion view of the Solar System from Earth displaying the Moon, the
+				Sun, and the other seven planets. The Earth is looking directly at the Solar System's
+				center of mass. This direction forms the <em><strong>z&#x302;</strong></em> axis. The
+				horizontal or <em><strong>x&#x302;</strong></em> axis is aligned so that the span of
+				<em><strong>x&#x302;</strong></em> and <em><strong>z&#x302;</strong></em> forms the
+				ecliptic plane. The vertical or <em><strong>y&#x302;</strong></em> axis is aligned so
+				that the Earth orbits the Sun counterclockwise from the perspective of an observer
+				positioned on the positive <em><strong>y&#x302;</strong></em> axis looking towards the
+				origin.
+			</p>
+			<p>
+				This simulation isn't real-time. It's not even accurate. It's an <em>N</em>-body
+				gravitational simulation. The Sun starts out at the origin at rest. All planets start on
+				the negative <em><strong>z&#x302;</strong></em> axis. Each planet starts with its
+				distance from the Sun being the same as the semi-major axis of its real orbit. Each
+				planet also starts with its speed set to the mean speed of its real orbit, moving
+				orthogonal to its position vector so that it moves counterclockwise around the
+				<em><strong>y&#x302</strong></em> axis. Each planet's position vector starts out tilted
+				towards the <em><strong>y&#x302</strong></em> by an angle equal to its real orbit's
+				inclination to the ecliptic plane. The Moon is similarly placed with respect to the
+				Earth.
+			</p>
+		</div>
+	</body>
+</html>
