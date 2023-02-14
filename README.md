@@ -1,6 +1,8 @@
-# Solar System
+# solar-system
 
 This is an $N$-body simulation of the Solar System.
+
+## Description
 
 This is a first-persion view of the Solar System from Earth displaying the Moon, the Sun, and the
 other seven planets. The Earth is looking directly at the Solar System's center of mass. This
@@ -14,14 +16,28 @@ This simulation isn't real-time. It's not even accurate. It's an $N$-body gravit
 The Sun starts out at the origin at rest. All of the planets and the Moon start at their approximate
 real positions on 2023/01/01.
 
+## Desktop and Web Browser
+
+This application can be run on the desktop or in a web browser.
+
+## Building It
+
+The desktop version of solar-system is built using Cargo.
+
+```console
+cargo build --release
+```
+
+__TODO discuss building the web browser version__
+
 ## Future work
 
 1. Document the code.
 1. Finish creating unit tests.
-1. Fix time keeping in WebAssemby version.
 1. Label bodies in UI.
-1. Improve integration calculation of velocity and position when acceleration is changing rapidly.
+1. Fix time keeping in WebAssemby version.
 1. Allow camera position and orientation to be changed through the UI.
+1. Improve integration calculation of velocity and position when acceleration is changing rapidly.
 1. Allow addition of celestial bodies through the UI.
 1. Extend to support starting times other than 2023/01/01.
 1. Replace measures library with a more mature library from crates.io.
