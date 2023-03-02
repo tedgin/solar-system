@@ -10,5 +10,5 @@ impl TimeKeeper for Clock {
         Self {}
     }
 
-    fn advance(&mut self, _: &Duration) {}
+    fn advance(&mut self, _: Duration) {}
 }

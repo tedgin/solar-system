@@ -1,11 +1,9 @@
-use crate::color::{Color, self};
 use crate::measures::*;
 use nalgebra::{Rotation3, Vector3};
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter, Result};
 use std::rc::{Rc, Weak};
-use std::slice::Iter;
 
 const G: f64 = 6.67430e-11; // m³/kg/s²
 const TOL: f64 = 1e-8;
@@ -76,6 +74,14 @@ mod kepler_orbit {
     use std::f64::consts;
 
     use crate::measures::{Angle, Displacement, Mass, Time, Velocity};
+
+    pub fn apsis(eccentricity: f64, semimajor_axis: Displacement) -> Displacement {
+        (1. + eccentricity) * semimajor_axis
+    }
+
+    pub fn periapsis(eccentricity: f64, semimajor_axis: Displacement) -> Displacement {
+        (1. - eccentricity) * semimajor_axis
+    }
 
     pub fn period(primary_mass: Mass, satellite_mass: Mass, semimajor_axis: Displacement) -> Time {
         let m = (primary_mass + satellite_mass).to_kg();
@@ -274,7 +280,6 @@ pub enum Body {
 }
 
 pub struct BodyProperties {
-    color: Color,
     mass: Mass,
     radius: Displacement,
     primary: Weak<Self>,
@@ -293,7 +298,6 @@ pub struct BodyProperties {
 impl BodyProperties {
     fn sun(epoch: Time) -> Self {
         Self {
-            color: color::YELLOW,
             mass: Mass::from_kg(1.988_5e30),
             radius: Displacement::from_km(695_700.),
             primary: Weak::new(),
@@ -309,7 +313,6 @@ impl BodyProperties {
 
     fn earth(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::BLUE,
             mass: Mass::from_kg(5.972_17e24),
             radius: Displacement::from_km(6_371.0),
             primary: sun,
@@ -325,7 +328,6 @@ impl BodyProperties {
 
     fn moon(epoch: Time, earth: Weak<Self>) -> Self {
         Self {
-            color: color::WHITE,
             mass: Mass::from_kg(7.342e22),
             radius: Displacement::from_km(1_737.4),
             primary: earth,
@@ -341,7 +343,6 @@ impl BodyProperties {
 
     fn jupiter(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_color(1., 0.9, 0.7),
             mass: Mass::from_kg(1.898_2e27),
             radius: Displacement::from_km(69_911.),
             primary: sun,
@@ -357,7 +358,6 @@ impl BodyProperties {
 
     fn mars(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::RED,
             mass: Mass::from_kg(6.417_1e23),
             radius: Displacement::from_km(3_389.5),
             primary: sun,
@@ -373,7 +373,6 @@ impl BodyProperties {
 
     fn mercury(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_gray(0.5),
             mass: Mass::from_kg(3.301_1e23),
             radius: Displacement::from_km(2_439.7),
             primary: sun,
@@ -389,7 +388,6 @@ impl BodyProperties {
 
     fn neptune(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_color(0.5, 0.5, 1.),
             mass: Mass::from_kg(1.024_13e26),
             radius: Displacement::from_km(24_622.),
             primary: sun,
@@ -405,7 +403,6 @@ impl BodyProperties {
 
     fn saturn(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_color(0.8, 0.7, 0.5),
             mass: Mass::from_kg(5.683_4e26),
             radius: Displacement::from_km(58_232.),
             primary: sun,
@@ -421,7 +418,6 @@ impl BodyProperties {
 
     fn uranus(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_color(0.9, 0.9, 1.),
             mass: Mass::from_kg(8.681_0e25),
             radius: Displacement::from_km(25_362.),
             primary: sun,
@@ -437,7 +433,6 @@ impl BodyProperties {
 
     fn venus(epoch: Time, sun: Weak<Self>) -> Self {
         Self {
-            color: color::mk_gray(0.8),
             mass: Mass::from_kg(4.867_5e24),
             radius: Displacement::from_km(6_051.8),
             primary: sun,
@@ -499,16 +494,22 @@ impl BodyProperties {
         bodies
     }
 
-    pub fn color(&self) -> &Color {
-        &self.color
-    }
-
     pub fn radius(&self) -> Displacement {
         self.radius
     }
 
-    pub fn semimajor_axis(&self) -> Displacement {
-        self.semimajor_axis
+    pub fn apsis(&self) -> Displacement {
+        match self.primary.upgrade() {
+            None => Displacement::from_m(0.),
+            Some(_) => kepler_orbit::apsis(self.eccentricity, self.semimajor_axis),
+        }
+    }
+
+    pub fn periapsis(&self) -> Displacement {
+        match self.primary.upgrade() {
+            None => Displacement::from_m(0.),
+            Some(_) => kepler_orbit::periapsis(self.eccentricity, self.semimajor_axis),
+        }
     }
 
     fn eccentric_anomaly(&self) -> Angle {
@@ -628,10 +629,6 @@ impl OrbitalState {
         }
     }
 
-    pub fn body(&self) -> Body {
-        self.body
-    }
-
     pub fn position(&self) -> &Vector3<f64> {
         &self.position
     }
@@ -690,10 +687,6 @@ impl SolarSystem {
         }
     }
 
-    pub fn body_states(&self) -> Iter<OrbitalState> {
-        self.body_states.iter()
-    }
-
     pub fn advance_time(&mut self, dt: f64) {
         self.time += dt;
 
@@ -715,10 +708,10 @@ impl SolarSystem {
         }
     }
 
-    pub fn position_of(&self, body: Body) -> Vector3<f64> {
+    pub fn position_of(&self, body: Body) -> &Vector3<f64> {
         for state in self.body_states.iter() {
             if state.body == body {
-                return state.position;
+                return state.position();
             }
         }
         panic!("unknown celestial body");

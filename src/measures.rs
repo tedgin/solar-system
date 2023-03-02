@@ -9,8 +9,8 @@ pub struct Angle {
 }
 
 impl Angle {
-    const DEG_PER_ROT: f64 = 360.;
-    const RAD_PER_DEG: f64 = consts::TAU / Self::DEG_PER_ROT;
+    pub const DEG_PER_ROT: f64 = 360.;
+    pub const RAD_PER_DEG: f64 = consts::TAU / Self::DEG_PER_ROT;
 
     pub const NAN: Self = Self { rad: f64::NAN };
 
@@ -55,7 +55,7 @@ impl Angle {
 impl Neg for Angle {
     type Output = Self;
 
-    fn neg(self) -> Self {
+    fn neg(self) -> Self::Output {
         if self.rad < consts::PI {
             Self { rad: -self.rad }
         } else {
@@ -67,7 +67,7 @@ impl Neg for Angle {
 impl Add for Angle {
     type Output = Self;
 
-    fn add(self, addend: Self) -> Self {
+    fn add(self, addend: Self) -> Self::Output {
         Self { rad: self.rad + addend.rad }
     }
 }
@@ -75,7 +75,7 @@ impl Add for Angle {
 impl Sub for Angle {
     type Output = Self;
 
-    fn sub(self, subtrahend: Self) -> Self {
+    fn sub(self, subtrahend: Self) -> Self::Output {
         Self { rad: self.rad - subtrahend.rad }
     }
 }
@@ -89,7 +89,7 @@ impl SubAssign for Angle {
 impl Mul<Angle> for f64 {
     type Output = Angle;
 
-    fn mul(self, multiplicand: Angle) -> Angle {
+    fn mul(self, multiplicand: Angle) -> Self::Output {
         Angle { rad: self * multiplicand.rad }
     }
 }
@@ -100,19 +100,28 @@ pub struct Displacement {
 }
 
 impl Displacement {
-    const M_PER_KM: f64 = 1e3;
-    const M_PER_GM: f64 = 1e9;
+    pub const M_PER_AU: f64 = 1.495_978_707e11;
+    pub const M_PER_KM: f64 = 1e3;
+    pub const M_PER_GM: f64 = 1e9;
 
-    pub fn from_m(m: f64) -> Self {
-        Self { m }
+    pub fn from_au(au: f64) -> Self {
+        Self { m: Self::M_PER_AU * au }
+    }
+
+    pub fn from_gm(gm: f64) -> Self {
+        Self { m: Self::M_PER_GM * gm }
     }
 
     pub fn from_km(km: f64) -> Self {
         Self { m: Self::M_PER_KM * km }
     }
 
-    pub fn from_gm(gm: f64) -> Self {
-        Self { m: Self::M_PER_GM * gm }
+    pub fn from_m(m: f64) -> Self {
+        Self { m }
+    }
+
+    pub fn to_au(self) -> f64 {
+        self.m / Self::M_PER_AU
     }
 
     pub fn to_m(self) -> f64 {
@@ -127,7 +136,7 @@ impl Displacement {
 impl Add for Displacement {
     type Output = Self;
 
-    fn add(self, addend: Self) -> Self {
+    fn add(self, addend: Self) -> Self::Output {
         Self { m: self.m + addend.m }
     }
 }
@@ -135,18 +144,35 @@ impl Add for Displacement {
 impl Mul<f64> for Displacement {
     type Output = Self;
 
-    fn mul(self, multiplicand: f64) -> Self {
+    fn mul(self, multiplicand: f64) -> Self::Output {
         Self { m: self.m * multiplicand }
+    }
+}
+
+impl Mul<Displacement> for f64 {
+    type Output = Displacement;
+
+    fn mul(self, multiplicand: Displacement) -> Self::Output {
+        Displacement { m: self * multiplicand.m }
+    }
+}
+
+impl Div for Displacement {
+    type Output = f64;
+
+    fn div(self, divisor: Displacement) -> Self::Output {
+        self.m / divisor.m
     }
 }
 
 impl Div<f64> for Displacement {
     type Output = Self;
 
-    fn div(self, divisor: f64) -> Self {
+    fn div(self, divisor: f64) -> Self::Output {
         Self { m : self.m / divisor }
     }
 }
+
 
 #[derive(Clone, Copy)]
 pub struct Mass {
@@ -166,7 +192,7 @@ impl Mass {
 impl Add for Mass {
     type Output = Self;
 
-    fn add(self, addend: Self) -> Self {
+    fn add(self, addend: Self) -> Self::Output {
         Self { kg: self.kg + addend.kg }
     }
 }
@@ -177,10 +203,10 @@ pub struct Time {
 }
 
 impl Time {
-    const HR_PER_DAY: f64 = 24.;
-    const MIN_PER_HR: f64 = 60.;
-    const S_PER_MIN: f64 = 60.;
-    const S_PER_DAY: f64 = Self::S_PER_MIN * Self::MIN_PER_HR * Self::HR_PER_DAY;
+    pub const HR_PER_DAY: f64 = 24.;
+    pub const MIN_PER_HR: f64 = 60.;
+    pub const S_PER_MIN: f64 = 60.;
+    pub const S_PER_DAY: f64 = Self::S_PER_MIN * Self::MIN_PER_HR * Self::HR_PER_DAY;
 
     pub const NAN: Self = Self { s: f64::NAN };
 
@@ -196,7 +222,7 @@ impl Time {
 impl Sub for Time {
     type Output = Self;
 
-    fn sub(self, subtrahend: Self) -> Self {
+    fn sub(self, subtrahend: Self) -> Self::Output {
         Self {
             s: self.s - subtrahend.s,
         }
@@ -206,7 +232,7 @@ impl Sub for Time {
 impl Div for Time {
     type Output = f64;
 
-    fn div(self, divisor: Self) -> f64 {
+    fn div(self, divisor: Self) -> Self::Output {
         self.s / divisor.s
     }
 }
