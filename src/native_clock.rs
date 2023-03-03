@@ -15,7 +15,7 @@ impl TimeKeeper for Clock {
         }
     }
 
-    fn advance(&mut self, step: &Duration) {
+    fn advance(&mut self, step: Duration) {
         if let Some(remaining_time) = step.checked_sub(self.step_start_time.elapsed()) {
             thread::sleep(remaining_time);
         }

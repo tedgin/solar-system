@@ -5,181 +5,291 @@ use kiss3d::planar_camera::PlanarCamera;
 use kiss3d::post_processing::post_processing_effect::PostProcessingEffect;
 use kiss3d::renderer::Renderer;
 use kiss3d::scene::SceneNode;
+use kiss3d::text::Font;
 use kiss3d::window::{State, Window};
 
 extern crate nalgebra;
-use nalgebra::{Point3, Translation3, Vector3};
+use nalgebra::{Point3, Reflection, Translation3, Vector2, Vector3};
 
 pub mod clock;
 use clock::TimeKeeper;
 
 mod color;
+use color::Color;
 
 mod measures;
-use measures::{Displacement, Time};
+use measures::{Displacement, Time, Angle};
 
 mod simulation;
-use simulation::{Body, SolarSystem};
+use simulation::{Body, BodyProperties, SolarSystem};
 
 use std::collections::HashMap;
 use std::time::Duration;
 use std::{f32, f64};
 
-// The default frustrum max Z is 1024 for ArcBall camera
-const VIEW_DEPTH: f64 = 1e3;
-const VIEW_DIAMETER: f64 = 5e12; // Just past the orbit of Neptune
+// kiss3d::camera::FirstPerson default FOV
+const FOV_DEFAULT: f32 = f32::consts::FRAC_PI_4;
 
-// The minimum angular size of a
-const MIN_ANGULAR_RES: f64 = 5e-4; // rad
+// The relative amount the view frustrum needs to extend beyond the view space.
+const FRUSTRUM_EASEMENT: f64 = 1.1;
 
-fn choose_radius(body: Body, solar_system: &SolarSystem, scale_factor: f64) -> Displacement {
-    let obj_props = solar_system.properties_of(body);
-    let rad_guess = obj_props.radius();
+// The relative amount the light has to be above the surface of the Sun to give
+// the illusion that the Sun's avatar is glowing.
+const LIGHT_EASEMENT: f64 = 2.;
 
-    let max_dist = match body {
-        Body::Earth => Displacement::from_m(0.),
-        Body::Moon => obj_props.semimajor_axis(),
-        _ => {
-            let earth = solar_system.properties_of(Body::Earth);
-            obj_props.semimajor_axis() + earth.semimajor_axis()
+const EPOCH_JD: f64 = 2_459_945.5; // Julian Date in days for 2023-01-01T00:00:00 UTC
+
+const DT: f64 = 3600.;
+const FRAME_RATE: f64 = 60.;
+
+const PT_PER_IN: f64 = 72.;
+const STANDARD_DPI: f64 = 96.;
+const TEXT_SIZE_PT: f64 = 10.;
+const LOGICAL_TEXT_SIZE_PX: f64 = TEXT_SIZE_PT * STANDARD_DPI / PT_PER_IN;
+
+const EYE_ANGULAR_RES: f64 = 3e-4; // rad
+const MIN_OBSERVER_DIST: f64 = 0.3; // m
+
+fn min_angular_res(window: &Window) -> Angle {
+    let pixel_size = Displacement::from_in(1. / (STANDARD_DPI * window.scale_factor()));
+    let obs_dist = Displacement::from_m(MIN_OBSERVER_DIST);
+    let screen_angular_res = 2. * Angle::atan(pixel_size / (2. * obs_dist));
+    Angle::from_rad(EYE_ANGULAR_RES).max(screen_angular_res)
+}
+
+fn avatar_color(body: Body) -> Color {
+    match body {
+        Body::Earth => color::BLUE,
+        Body::Jupiter => color::mk_color(1., 0.9, 0.7),
+        Body::Mars => color::RED,
+        Body::Mercury => color::mk_gray(0.5),
+        Body::Moon => color::WHITE,
+        Body::Neptune => color::mk_color(0.5, 0.5, 1.),
+        Body::Saturn => color::mk_color(0.8, 0.7, 0.5),
+        Body::Sun => color::YELLOW,
+        Body::Uranus => color::mk_color(0.9, 0.9, 1.),
+        Body::Venus => color::mk_gray(0.8),
+    }
+}
+
+fn avatar_label(body: Body) -> &'static str {
+    match body {
+        Body::Earth => "Earth",
+        Body::Jupiter => "Jupiter",
+        Body::Mars => "Mars",
+        Body::Mercury => "Mercury",
+        Body::Moon => "Moon",
+        Body::Neptune => "Neptune",
+        Body::Saturn => "Saturn",
+        Body::Sun => "Sun",
+        Body::Uranus => "Uranus",
+        Body::Venus => "Venus",
+    }
+}
+
+struct BodyAvatar {
+    node: SceneNode,
+    radius: Displacement,
+    label: String,
+}
+
+impl BodyAvatar {
+    fn new(
+        properties: &BodyProperties,
+        color: &Color,
+        label: &str,
+        min_radius: Displacement,
+        window: &mut Window,
+    ) -> BodyAvatar {
+        let radius = properties.radius().max(min_radius);
+        let mut node = window.add_sphere(radius.to_au() as f32);
+        node.set_color(
+            color.red() as f32,
+            color.green() as f32,
+            color.blue() as f32,
+        );
+
+        BodyAvatar {
+            node,
+            radius,
+            label: String::from(label),
         }
-    };
-    let rad_min = max_dist * MIN_ANGULAR_RES.tan();
-    rad_guess.max(rad_min) * scale_factor
-}
+    }
 
-struct ViewController {
-    body_views: HashMap<Body, SceneNode>,
-    camera: FirstPerson,
-    scale_factor: f64,
-    sun_radius: Displacement,
-}
-
-impl ViewController {
-    fn new(window: &mut Window, solar_system: &SolarSystem) -> Self {
-        let scale_factor = VIEW_DEPTH / VIEW_DIAMETER;
-        let mut sun_radius = Displacement::from_m(0.);
-
-        let mut body_views: HashMap<Body, SceneNode> = HashMap::new();
-        for state in solar_system.body_states() {
-            let radius = choose_radius(state.body(), solar_system, scale_factor);
-            match state.body() {
-                Body::Sun => sun_radius = radius,
-                _ => {}
-            }
-            let mut body_view = window.add_sphere(radius.to_m() as f32);
-            body_view.set_visible(false);
-            let color = solar_system.properties_of(state.body()).color();
-            body_view.set_color(
-                color.red() as f32,
-                color.green() as f32,
-                color.blue() as f32,
+    fn mk_avatars(window: &mut Window, solar_system: &SolarSystem) -> HashMap<Body, BodyAvatar> {
+        let min_angle = min_angular_res(window);
+        let mut avatars: HashMap<Body, BodyAvatar> = HashMap::new();
+        for body in [
+            Body::Sun,
+            Body::Moon,
+            Body::Mercury,
+            Body::Venus,
+            Body::Mars,
+            Body::Jupiter,
+            Body::Saturn,
+            Body::Uranus,
+            Body::Neptune,
+        ] {
+            let properties = solar_system.properties_of(body);
+            let max_dist = match body {
+                Body::Moon => properties.apsis(),
+                _ => {
+                    let earth = solar_system.properties_of(Body::Earth);
+                    properties.apsis() + earth.apsis()
+                }
+            };
+            let avatar = BodyAvatar::new(
+                solar_system.properties_of(body),
+                &avatar_color(body),
+                avatar_label(body),
+                max_dist * min_angle.tan() / 2.,
+                window,
             );
-            body_views.insert(state.body(), body_view);
+            avatars.insert(body, avatar);
         }
 
-        window.show();
+        avatars
+    }
+
+    fn label(&self) -> &str {
+        self.label.as_str()
+    }
+
+    fn radius(&self) -> Displacement {
+        self.radius
+    }
+
+    fn update_position(&mut self, position: &Vector3<f64>) {
+        self.node.set_local_translation(Translation3::from(
+            (position / Displacement::M_PER_AU).cast::<f32>(),
+        ));
+    }
+}
+
+// The view space distance units are in AU.
+pub struct Simulator<T: TimeKeeper> {
+    clock: T,
+    solar_system: SolarSystem,
+    body_avatars: HashMap<Body, BodyAvatar>,
+    camera: FirstPerson,
+}
+
+impl<T: TimeKeeper> Simulator<T> {
+    pub fn new(clock: T, window: &mut Window) -> Self {
+        let solar_system = SolarSystem::init(Time::from_day(EPOCH_JD));
+
+        let earth_apsis = solar_system.properties_of(Body::Earth).apsis();
+        let neptune_apsis = solar_system.properties_of(Body::Neptune).apsis();
+        let view_depth = earth_apsis + neptune_apsis;
+
+        let body_avatars = BodyAvatar::mk_avatars(window, &solar_system);
+
+        let znear = solar_system.properties_of(Body::Moon).periapsis()
+            * f64::cos(FOV_DEFAULT as f64 / 2.)
+            / FRUSTRUM_EASEMENT;
+        let zfar = view_depth * FRUSTRUM_EASEMENT;
 
         let mut camera = FirstPerson::new_with_frustrum(
-            f32::consts::FRAC_PI_4,
-            1e-2,
-            1e4,
+            FOV_DEFAULT,
+            znear.to_au() as f32,
+            zfar.to_au() as f32,
             Point3::new(1., 0., 0.),
             Point3::new(0., 0., 0.),
         );
         camera.set_up_axis_dir(Vector3::z_axis());
 
-        Self {
-            body_views,
-            camera,
-            scale_factor,
-            sun_radius,
-        }
-    }
-
-    fn update_view(&mut self, window: &mut Window, solar_system: &SolarSystem) {
-        for state in solar_system.body_states() {
-            if state.body() != Body::Earth {
-                let obj_pos = state.position();
-                let position = Translation3::new(
-                    self.scale(obj_pos[0]),
-                    self.scale(obj_pos[1]),
-                    self.scale(obj_pos[2]),
-                );
-                self.body_views
-                    .get_mut(&state.body())
-                    .unwrap()
-                    .set_local_translation(position);
-            }
-            let camera_pos = solar_system.position_of(Body::Earth);
-            let sun_pos = solar_system.position_of(Body::Sun);
-
-            // Light has to be outside of sun sphere by some distance for sun to
-            // glow, so multiply radius by 2.
-            let sun_rad_offset = self.sun_radius * 2. / self.scale_factor;
-
-            let light_pos = sun_pos + (camera_pos - sun_pos).normalize() * sun_rad_offset.to_m();
-            self.orient_camera(&camera_pos);
-            self.set_light(window, &light_pos);
-            self.body_views
-                .get_mut(&state.body())
-                .unwrap()
-                .set_visible(true);
-        }
-    }
-
-    fn orient_camera(&mut self, pos: &Vector3<f64>) {
-        self.camera.look_at(
-            Point3::new(self.scale(pos[0]), self.scale(pos[1]), self.scale(pos[2])),
-            Point3::new(0., 0., 0.),
-        )
-    }
-
-    fn set_light(&self, window: &mut Window, pos: &Vector3<f64>) {
-        let light_pos = Light::Absolute(Point3::new(
-            self.scale(pos[0]),
-            self.scale(pos[1]),
-            self.scale(pos[2]),
-        ));
-        window.set_light(light_pos);
-    }
-
-    fn scale(&self, length: f64) -> f32 {
-        (self.scale_factor * length) as f32
-    }
-}
-
-const DT: f64 = 3600.;
-const FRAME_RATE: f64 = 60.;
-
-pub struct Simulator<T: TimeKeeper> {
-    solar_system: SolarSystem,
-    controller: ViewController,
-    clock: T,
-}
-
-impl<T: TimeKeeper + Clone> Simulator<T> {
-    pub fn new(clock: T, window: &mut Window) -> Self {
-        let start_time = Time::from_day(2_459_945.5); // 2023-01-01T00:00:00 UTC
-        let solar_system = SolarSystem::init(start_time);
-        let controller = ViewController::new(window, &solar_system);
-
-        Self {
-            solar_system,
-            controller,
+        let mut sim = Self {
             clock,
+            solar_system,
+            body_avatars,
+            camera,
+        };
+
+        sim.render(window);
+
+        sim
+    }
+
+    fn render(&mut self, window: &mut Window) {
+        self.position_avatars();
+        self.orient_camera();
+        self.position_light(window);
+        self.label_bodies(window);
+    }
+
+    fn label_bodies(&mut self, window: &mut Window) {
+        let screen_dims = Vector2::new(window.width() as f32, window.height() as f32);
+        let screen_reflect = Reflection::new(Vector2::y_axis(), screen_dims.y / 2.);
+
+        for body in self.body_avatars.keys() {
+            let world_pos = Point3::from(
+                (self.solar_system.position_of(*body) / Displacement::M_PER_AU).cast::<f32>(),
+            );
+            let view_pos = self.camera.view_transform().transform_point(&world_pos);
+
+            if view_pos.z < 0. {
+                let mut screen_pos: Vector2<f32> = self.camera.project(&world_pos, &screen_dims);
+                screen_reflect.reflect(&mut screen_pos);
+
+                let color = avatar_color(*body);
+                // XXX - have to double the width and height of the screen. See
+                //    https://github.com/sebcrozet/kiss3d/issues/204
+                // window.draw_text(
+                //     self.body_avatars.get(body).unwrap().label(),
+                //     &screen_pos.into(),
+                //    (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
+                //     &Font::default(),
+                //     &Point3::new(1., 1., 0.),
+                // );
+                window.draw_text(
+                    self.body_avatars.get(body).unwrap().label(),
+                    &(2. * screen_pos).into(),
+                    (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
+                    &Font::default(),
+                    &Point3::new(
+                        color.red() as f32,
+                        color.green() as f32,
+                        color.blue() as f32,
+                    ),
+                );
+                // XXX - ^^^
+            }
         }
+    }
+
+    fn orient_camera(&mut self) {
+        let camera_pos = *self.solar_system.position_of(Body::Earth);
+
+        let eye_loc = Point3::from((camera_pos / Displacement::M_PER_AU).cast::<f32>());
+        self.camera.look_at(eye_loc, Point3::origin());
+    }
+
+    fn position_avatars(&mut self) {
+        for avatar in self.body_avatars.iter_mut() {
+            avatar
+                .1
+                .update_position(self.solar_system.position_of(*avatar.0));
+        }
+    }
+
+    fn position_light(&self, window: &mut Window) {
+        // For the Sun to appear to glow, a light needs to be placed exterior to
+        // the Sun in the direction of the camera. If the light is too close to
+        // the Sun, it looks like it is reflecting light. As the distance of the
+        // light from the Sun increases, the likelihood of a planet passing
+        // between the light and the Sun increases, ruining the glowing
+        // illusion.
+        let camera_pos = self.camera.eye().cast::<f64>();
+        let sun_pos =
+            Point3::from(self.solar_system.position_of(Body::Sun) / Displacement::M_PER_AU);
+        let sun_rad_offset = self.body_avatars.get(&Body::Sun).unwrap().radius() * LIGHT_EASEMENT;
+        let sun_disp = (1. - sun_rad_offset.to_au()) * (sun_pos - camera_pos);
+        let light_pos = camera_pos + sun_disp;
+        window.set_light(Light::Absolute(light_pos.cast::<f32>()));
     }
 }
 
-impl<T: TimeKeeper + 'static> State for Simulator<T> {
-    fn step(&mut self, window: &mut Window) {
-        self.clock
-            .advance(&Duration::from_secs_f64(1. / FRAME_RATE));
-        self.solar_system.advance_time(DT);
-        self.controller.update_view(window, &self.solar_system);
-    }
-
+impl<T: TimeKeeper + Clone + 'static> State for Simulator<T> {
     fn cameras_and_effect_and_renderer(
         &mut self,
     ) -> (
@@ -188,6 +298,12 @@ impl<T: TimeKeeper + 'static> State for Simulator<T> {
         Option<&mut dyn Renderer>,
         Option<&mut dyn PostProcessingEffect>,
     ) {
-        (Some(&mut self.controller.camera), None, None, None)
+        (Some(&mut self.camera), None, None, None)
+    }
+
+    fn step(&mut self, window: &mut Window) {
+        self.clock.advance(Duration::from_secs_f64(1. / FRAME_RATE));
+        self.solar_system.advance_time(DT);
+        self.render(window);
     }
 }
