@@ -50,6 +50,18 @@ impl Angle {
     pub fn sin(self) -> f64 {
         self.rad.sin()
     }
+
+    pub fn tan(self) -> f64 {
+        self.rad.tan()
+    }
+
+    pub fn atan(arg: f64) -> Self {
+        Self { rad: f64::atan(arg) }
+    }
+
+    pub fn max(self, other: Self) -> Self {
+        Self { rad: self.rad.max(other.rad) }
+    }
 }
 
 impl Neg for Angle {
@@ -94,7 +106,7 @@ impl Mul<Angle> for f64 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Displacement {
     m: f64,
 }
@@ -103,6 +115,8 @@ impl Displacement {
     pub const M_PER_AU: f64 = 1.495_978_707e11;
     pub const M_PER_KM: f64 = 1e3;
     pub const M_PER_GM: f64 = 1e9;
+    pub const M_PER_MM: f64 = 1e-3;
+    pub const MM_PER_IN: f64 = 25.4;
 
     pub fn from_au(au: f64) -> Self {
         Self { m: Self::M_PER_AU * au }
@@ -110,6 +124,10 @@ impl Displacement {
 
     pub fn from_gm(gm: f64) -> Self {
         Self { m: Self::M_PER_GM * gm }
+    }
+
+    pub fn from_in(inch: f64) -> Self {
+        Self { m: Self::M_PER_MM * Self::MM_PER_IN * inch }
     }
 
     pub fn from_km(km: f64) -> Self {

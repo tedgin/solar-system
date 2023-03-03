@@ -9,7 +9,7 @@ use kiss3d::text::Font;
 use kiss3d::window::{State, Window};
 
 extern crate nalgebra;
-use nalgebra::{Point3, Translation3, Vector2, Vector3, Reflection};
+use nalgebra::{Point3, Reflection, Translation3, Vector2, Vector3};
 
 pub mod clock;
 use clock::TimeKeeper;
@@ -18,7 +18,7 @@ mod color;
 use color::Color;
 
 mod measures;
-use measures::{Displacement, Time};
+use measures::{Displacement, Time, Angle};
 
 mod simulation;
 use simulation::{Body, BodyProperties, SolarSystem};
@@ -42,11 +42,20 @@ const EPOCH_JD: f64 = 2_459_945.5; // Julian Date in days for 2023-01-01T00:00:0
 const DT: f64 = 3600.;
 const FRAME_RATE: f64 = 60.;
 
-// TODO Determine if this can be calculated through Kiss3d under certain
-// assumptions about how far away the user is from the screen. The minimum
-// angular size so that Neptune at its furthest distance from Earth will still
-// be visible on the screen.
-const MIN_ANGULAR_RES: f64 = 5e-4; // rad
+const PT_PER_IN: f64 = 72.;
+const STANDARD_DPI: f64 = 96.;
+const TEXT_SIZE_PT: f64 = 10.;
+const LOGICAL_TEXT_SIZE_PX: f64 = TEXT_SIZE_PT * STANDARD_DPI / PT_PER_IN;
+
+const EYE_ANGULAR_RES: f64 = 3e-4; // rad
+const MIN_OBSERVER_DIST: f64 = 0.3; // m
+
+fn min_angular_res(window: &Window) -> Angle {
+    let pixel_size = Displacement::from_in(1. / (STANDARD_DPI * window.scale_factor()));
+    let obs_dist = Displacement::from_m(MIN_OBSERVER_DIST);
+    let screen_angular_res = 2. * Angle::atan(pixel_size / (2. * obs_dist));
+    Angle::from_rad(EYE_ANGULAR_RES).max(screen_angular_res)
+}
 
 fn avatar_color(body: Body) -> Color {
     match body {
@@ -89,10 +98,10 @@ impl BodyAvatar {
         properties: &BodyProperties,
         color: &Color,
         label: &str,
-        max_dist: Displacement,
+        min_radius: Displacement,
         window: &mut Window,
     ) -> BodyAvatar {
-        let radius = properties.radius().max(max_dist * MIN_ANGULAR_RES.tan());
+        let radius = properties.radius().max(min_radius);
         let mut node = window.add_sphere(radius.to_au() as f32);
         node.set_color(
             color.red() as f32,
@@ -108,6 +117,7 @@ impl BodyAvatar {
     }
 
     fn mk_avatars(window: &mut Window, solar_system: &SolarSystem) -> HashMap<Body, BodyAvatar> {
+        let min_angle = min_angular_res(window);
         let mut avatars: HashMap<Body, BodyAvatar> = HashMap::new();
         for body in [
             Body::Sun,
@@ -132,7 +142,7 @@ impl BodyAvatar {
                 solar_system.properties_of(body),
                 &avatar_color(body),
                 avatar_label(body),
-                max_dist,
+                max_dist * min_angle.tan() / 2.,
                 window,
             );
             avatars.insert(body, avatar);
@@ -163,11 +173,6 @@ pub struct Simulator<T: TimeKeeper> {
     body_avatars: HashMap<Body, BodyAvatar>,
     camera: FirstPerson,
 }
-
-const PT_PER_IN: f64 = 72.;
-const STANDARD_DPI: f64 = 96.;
-const TEXT_SIZE_PT: f64 = 10.;
-const LOGICAL_TEXT_SIZE_PX: f64 = TEXT_SIZE_PT * STANDARD_DPI / PT_PER_IN;
 
 impl<T: TimeKeeper> Simulator<T> {
     pub fn new(clock: T, window: &mut Window) -> Self {
@@ -241,7 +246,11 @@ impl<T: TimeKeeper> Simulator<T> {
                     &(2. * screen_pos).into(),
                     (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
                     &Font::default(),
-                    &Point3::new(color.red() as f32, color.green() as f32, color.blue() as f32),
+                    &Point3::new(
+                        color.red() as f32,
+                        color.green() as f32,
+                        color.blue() as f32,
+                    ),
                 );
                 // XXX - ^^^
             }
@@ -271,7 +280,8 @@ impl<T: TimeKeeper> Simulator<T> {
         // between the light and the Sun increases, ruining the glowing
         // illusion.
         let camera_pos = self.camera.eye().cast::<f64>();
-        let sun_pos = Point3::from(self.solar_system.position_of(Body::Sun) / Displacement::M_PER_AU);
+        let sun_pos =
+            Point3::from(self.solar_system.position_of(Body::Sun) / Displacement::M_PER_AU);
         let sun_rad_offset = self.body_avatars.get(&Body::Sun).unwrap().radius() * LIGHT_EASEMENT;
         let sun_disp = (1. - sun_rad_offset.to_au()) * (sun_pos - camera_pos);
         let light_pos = camera_pos + sun_disp;
