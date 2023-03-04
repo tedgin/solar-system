@@ -1,5 +1,6 @@
+use kiss3d::nalgebra::{Rotation3, Vector3};
+
 use crate::measures::*;
-use nalgebra::{Rotation3, Vector3};
 use std::cmp::Eq;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter, Result};
@@ -10,8 +11,6 @@ const TOL: f64 = 1e-8;
 
 #[cfg(test)]
 mod asserts {
-    use nalgebra::{ArrayStorage, Const, Vector};
-
     pub trait Sizeable {
         fn abs(&self) -> f64;
     }
@@ -45,6 +44,10 @@ mod asserts {
             }
         };
     }
+    use kiss3d::nalgebra::ArrayStorage;
+    use kiss3d::nalgebra::Const;
+    use kiss3d::nalgebra::Vector;
+
     pub use crate::assert_abs_eq;
 
     #[macro_export]
@@ -70,8 +73,9 @@ mod asserts {
 }
 
 mod kepler_orbit {
-    use nalgebra::Vector2;
     use std::f64::consts;
+
+    use kiss3d::nalgebra::Vector2;
 
     use crate::measures::{Angle, Displacement, Mass, Time, Velocity};
 

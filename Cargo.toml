@@ -1,13 +1,12 @@
 [package]
 name = "solar-system"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [features]
 wasm = ["dep:console_error_panic_hook", "dep:wasm-bindgen"]
 
 [dependencies]
-kiss3d = "0.35.0"
-nalgebra = "0.30.1"  # Locked by kiss3d
-console_error_panic_hook = { version = "0.1.7", optional = true }
-wasm-bindgen = { version = "0.2.83", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+kiss3d = { version = "0.35", features = ["conrod"] }
+wasm-bindgen = { version = "0.2", optional = true }

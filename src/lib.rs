@@ -1,6 +1,8 @@
 extern crate kiss3d;
 use kiss3d::camera::{Camera, FirstPerson};
+use kiss3d::conrod::{color, Color};
 use kiss3d::light::Light;
+use kiss3d::nalgebra::{Vector3, Vector2, Translation3, Point3, Reflection};
 use kiss3d::planar_camera::PlanarCamera;
 use kiss3d::post_processing::post_processing_effect::PostProcessingEffect;
 use kiss3d::renderer::Renderer;
@@ -8,17 +10,11 @@ use kiss3d::scene::SceneNode;
 use kiss3d::text::Font;
 use kiss3d::window::{State, Window};
 
-extern crate nalgebra;
-use nalgebra::{Point3, Reflection, Translation3, Vector2, Vector3};
-
 pub mod clock;
 use clock::TimeKeeper;
 
-mod color;
-use color::Color;
-
 mod measures;
-use measures::{Displacement, Time, Angle};
+use measures::{Angle, Displacement, Time};
 
 mod simulation;
 use simulation::{Body, BodyProperties, SolarSystem};
@@ -61,15 +57,15 @@ fn min_angular_res(window: &Window) -> Angle {
 fn avatar_color(body: Body) -> Color {
     match body {
         Body::Earth => color::BLUE,
-        Body::Jupiter => color::mk_color(1., 0.9, 0.7),
+        Body::Jupiter => color::rgb(1., 0.9, 0.7),
         Body::Mars => color::RED,
-        Body::Mercury => color::mk_gray(0.5),
+        Body::Mercury => color::grayscale(0.5),
         Body::Moon => color::WHITE,
-        Body::Neptune => color::mk_color(0.5, 0.5, 1.),
-        Body::Saturn => color::mk_color(0.8, 0.7, 0.5),
+        Body::Neptune => color::rgb(0.5, 0.5, 1.),
+        Body::Saturn => color::rgb(0.8, 0.7, 0.5),
         Body::Sun => color::YELLOW,
-        Body::Uranus => color::mk_color(0.9, 0.9, 1.),
-        Body::Venus => color::mk_gray(0.8),
+        Body::Uranus => color::rgb(0.9, 0.9, 1.),
+        Body::Venus => color::grayscale(0.8),
     }
 }
 
@@ -104,11 +100,7 @@ impl BodyAvatar {
     ) -> BodyAvatar {
         let radius = properties.radius().max(min_radius);
         let mut node = window.add_sphere(radius.to_au() as f32);
-        node.set_color(
-            color.red() as f32,
-            color.green() as f32,
-            color.blue() as f32,
-        );
+        node.set_color(color.red(), color.green(), color.blue());
 
         BodyAvatar {
             node,
@@ -234,29 +226,21 @@ impl<T: TimeKeeper> Simulator<T> {
 
                 let color = avatar_color(*body);
                 // XXX - have to double the width and height of the screen. See
-                //    https://github.com/sebcrozet/kiss3d/issues/98. This is
-                //    fixed in PR https://github.com/sebcrozet/kiss3d/pull/319/.
+                //    https://github.com/sebcrozet/kiss3d/issues/98. This is fixed in PR
+                //    https://github.com/sebcrozet/kiss3d/pull/319/.
                 // window.draw_text(
                 //     self.body_avatars.get(body).unwrap().label(),
                 //     &screen_pos.into(),
                 //     (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
                 //     &Font::default(),
-                //     &Point3::new(
-                //         color.red() as f32,
-                //         color.green() as f32,
-                //         color.blue() as f32,
-                //     ),
+                //     &Point3::new(color.red(), color.green(), color.blue()),
                 // );
                 window.draw_text(
                     self.body_avatars.get(body).unwrap().label(),
                     &(2. * screen_pos).into(),
-                    (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
+                    (2. * LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
                     &Font::default(),
-                    &Point3::new(
-                        color.red() as f32,
-                        color.green() as f32,
-                        color.blue() as f32,
-                    ),
+                    &Point3::new(color.red(), color.green(), color.blue()),
                 );
                 // XXX - ^^^
             }

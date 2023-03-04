@@ -41,6 +41,5 @@ __TODO discuss building the web browser version__
 1. Allow addition of celestial bodies through the UI.
 1. Extend to support starting times other than 2023/01/01.
 1. Replace measures library with a more mature library from crates.io.
-1. Replace color library with conrod_core::color.
 1. Fix bug in kiss3d that prevents text from being rendered in the correction location. This will be
    resolved if [kiss3d PR #319](https://github.com/sebcrozet/kiss3d/pull/319) is merged.
