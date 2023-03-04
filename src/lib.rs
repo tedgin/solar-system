@@ -44,10 +44,11 @@ const FRAME_RATE: f64 = 60.;
 
 const PT_PER_IN: f64 = 72.;
 const STANDARD_DPI: f64 = 96.;
-const TEXT_SIZE_PT: f64 = 10.;
+const TEXT_SIZE_PT: f64 = 6.;
 const LOGICAL_TEXT_SIZE_PX: f64 = TEXT_SIZE_PT * STANDARD_DPI / PT_PER_IN;
 
-const EYE_ANGULAR_RES: f64 = 3e-4; // rad
+// The minimum angular resolution of the human eye, doubled
+const EYE_ANGULAR_RES: f64 = 3e-4 * 2.; // rad
 const MIN_OBSERVER_DIST: f64 = 0.3; // m
 
 fn min_angular_res(window: &Window) -> Angle {
@@ -233,13 +234,18 @@ impl<T: TimeKeeper> Simulator<T> {
 
                 let color = avatar_color(*body);
                 // XXX - have to double the width and height of the screen. See
-                //    https://github.com/sebcrozet/kiss3d/issues/204
+                //    https://github.com/sebcrozet/kiss3d/issues/98. This is
+                //    fixed in PR https://github.com/sebcrozet/kiss3d/pull/319/.
                 // window.draw_text(
                 //     self.body_avatars.get(body).unwrap().label(),
                 //     &screen_pos.into(),
-                //    (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
+                //     (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
                 //     &Font::default(),
-                //     &Point3::new(1., 1., 0.),
+                //     &Point3::new(
+                //         color.red() as f32,
+                //         color.green() as f32,
+                //         color.blue() as f32,
+                //     ),
                 // );
                 window.draw_text(
                     self.body_avatars.get(body).unwrap().label(),
