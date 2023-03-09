@@ -28,18 +28,22 @@ The desktop version of solar-system is built using Cargo.
 cargo build --release
 ```
 
-__TODO discuss building the web browser version__
+The WebAssembly version can be built using [Trunk](https://trunkrs.dev/).
+
+```console
+trunk build --release --features wasm
+```console
 
 ## Future work
 
 1. Document the code.
 1. Finish creating unit tests.
+1. Fix bug in kiss3d that prevents text from being rendered in the correction location. This will be
+   resolved if [kiss3d PR #319](https://github.com/sebcrozet/kiss3d/pull/319) is merged.
 1. Fix time keeping in WebAssemby version.
-1. Fix label size issue in WebAssemby version.
+1. Fix label size issue in WebAssembly version.
 1. Allow camera position and orientation to be changed through the UI.
 1. Improve integration calculation of velocity and position when acceleration is changing rapidly.
 1. Allow addition of celestial bodies through the UI.
 1. Extend to support starting times other than 2023/01/01.
 1. Replace measures library with a more mature library from crates.io.
-1. Fix bug in kiss3d that prevents text from being rendered in the correction location. This will be
-   resolved if [kiss3d PR #319](https://github.com/sebcrozet/kiss3d/pull/319) is merged.

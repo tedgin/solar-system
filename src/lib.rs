@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::{f32, f64};
+
 extern crate kiss3d;
 use kiss3d::camera::{Camera, FirstPerson};
 use kiss3d::conrod::{color, Color};
@@ -10,18 +13,11 @@ use kiss3d::scene::SceneNode;
 use kiss3d::text::Font;
 use kiss3d::window::{State, Window};
 
-pub mod clock;
-use clock::TimeKeeper;
-
 mod measures;
 use measures::{Angle, Displacement, Time};
 
 mod simulation;
 use simulation::{Body, BodyProperties, SolarSystem};
-
-use std::collections::HashMap;
-use std::time::Duration;
-use std::{f32, f64};
 
 // kiss3d::camera::FirstPerson default FOV
 const FOV_DEFAULT: f32 = f32::consts::FRAC_PI_4;
@@ -36,7 +32,6 @@ const LIGHT_EASEMENT: f64 = 2.;
 const EPOCH_JD: f64 = 2_459_945.5; // Julian Date in days for 2023-01-01T00:00:00 UTC
 
 const DT: f64 = 3600.;
-const FRAME_RATE: f64 = 60.;
 
 const PT_PER_IN: f64 = 72.;
 const STANDARD_DPI: f64 = 96.;
@@ -160,15 +155,14 @@ impl BodyAvatar {
 }
 
 // The view space distance units are in AU.
-pub struct Simulator<T: TimeKeeper> {
-    clock: T,
+pub struct Simulator {
     solar_system: SolarSystem,
     body_avatars: HashMap<Body, BodyAvatar>,
     camera: FirstPerson,
 }
 
-impl<T: TimeKeeper> Simulator<T> {
-    pub fn new(clock: T, window: &mut Window) -> Self {
+impl Simulator {
+    pub fn new(window: &mut Window) -> Self {
         let solar_system = SolarSystem::init(Time::from_day(EPOCH_JD));
 
         let earth_apsis = solar_system.properties_of(Body::Earth).apsis();
@@ -192,7 +186,6 @@ impl<T: TimeKeeper> Simulator<T> {
         camera.set_up_axis_dir(Vector3::z_axis());
 
         let mut sim = Self {
-            clock,
             solar_system,
             body_avatars,
             camera,
@@ -212,7 +205,7 @@ impl<T: TimeKeeper> Simulator<T> {
 
     fn label_bodies(&mut self, window: &mut Window) {
         let screen_dims = Vector2::new(window.width() as f32, window.height() as f32);
-        let screen_reflect = Reflection::new(Vector2::y_axis(), screen_dims.y / 2.);
+        let screen_reflect = Reflection::new(Vector2::y_axis(), screen_dims[1] / 2.);
 
         for body in self.body_avatars.keys() {
             let world_pos = Point3::from(
@@ -220,7 +213,7 @@ impl<T: TimeKeeper> Simulator<T> {
             );
             let view_pos = self.camera.view_transform().transform_point(&world_pos);
 
-            if view_pos.z < 0. {
+            if view_pos[2] < 0. {
                 let mut screen_pos: Vector2<f32> = self.camera.project(&world_pos, &screen_dims);
                 screen_reflect.reflect(&mut screen_pos);
 
@@ -279,7 +272,7 @@ impl<T: TimeKeeper> Simulator<T> {
     }
 }
 
-impl<T: TimeKeeper + Clone + 'static> State for Simulator<T> {
+impl State for Simulator {
     fn cameras_and_effect_and_renderer(
         &mut self,
     ) -> (
@@ -292,7 +285,6 @@ impl<T: TimeKeeper + Clone + 'static> State for Simulator<T> {
     }
 
     fn step(&mut self, window: &mut Window) {
-        self.clock.advance(Duration::from_secs_f64(1. / FRAME_RATE));
         self.solar_system.advance_time(DT);
         self.render(window);
     }
