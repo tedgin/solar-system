@@ -1,61 +1,66 @@
 <!DOCTYPE html>
 
 <html lang="en">
-	<head>
-		<meta charset="utf-8"/>
-		<title>Solar System Simulation</title>
-		<style>
-			html, body {
-				height: 100%;
-				width: 100%;
-				margin: 0px;
-				overflow: hidden;
-			}
 
-			h1 {
-				text-align: center;
-			}
+<head>
+	<meta charset="utf-8" />
+	<title>Solar System Simulation</title>
+	<style>
+		html,
+		body {
+			height: 100%;
+			width: 100%;
+			margin: 0px;
+			overflow: hidden;
+		}
 
-			#canvas {
-				z-index: 0;
-				height: 100%;
-				width: 100%;
-			}
+		h1 {
+			text-align: center;
+		}
 
-			#description {
-				z-index: 1;
-				position: absolute;
-				top: 0px;
-				padding: 2em;
-				color: white;
-			}
+		#canvas {
+			z-index: 0;
+			height: 100%;
+			width: 100%;
+		}
 
-			mi.vector {
-				font-weight: bold;
-			}
-		</style>
-	</head>
-	<body>
-		<canvas id="canvas"></canvas>
-		<div id="description">
-			<h1>The Solar System from Earth</h1>
-			<p>
-				This is a first-persion view of the Solar System from Earth displaying the Moon, the
-				Sun, and the other seven planets. The Earth is looking directly at the Solar System's
-				center of mass. This direction forms the <math><mi class="vector">z&#x302;</mi></math>
-				axis. The horizontal or <math<mi class="vector">x&#x302;</mi></math> axis is aligned so
-				that the span of <math><mi class="vector">x&#x302;</mi></math> and
-				<math><mi class="vector">z&#x302;</mi></math> forms the ecliptic plane. The vertical or
-				<math><mi class="vector">y&#x302;</mi></math> axis is aligned so that the Earth orbits
-				the Sun counterclockwise from the perspective of an observer positioned on the positive
-				 <math><mi class="vector">y&#x302;</mi></math> axis looking towards the origin.
-			</p>
-			<p>
-				This simulation isn't real-time. It's not even accurate. It's an
-				<math><mi>N</mi></math>-body gravitational simulation. The Sun starts out at the origin
-				at rest. All of the planets and the Moon start at their approximate real positions on
-				2023/01/01.
-			</p>
-		</div>
-	</body>
+		#description {
+			z-index: 1;
+			position: absolute;
+			top: 0px;
+			padding: 2em;
+			color: white;
+		}
+
+		mi.vector {
+			font-weight: bold;
+		}
+
+	</style>
+</head>
+
+<body>
+	<canvas id="canvas"></canvas>
+	<div id="description">
+		<h1>The Solar System from Earth</h1>
+		<p>
+			This is a first-persion view of the Solar System from Earth displaying the Moon, the Sun,
+			and the other seven planets. The Earth is looking directly at the Solar System's center of
+			mass. This direction forms the <math><mi class="vector">z&#x302;</mi></math> axis. The
+			horizontal or <math<mi class="vector">x&#x302;</mi></math> axis is aligned so that the span
+			of <math><mi class="vector">x&#x302;</mi></math> and
+			<math><mi class="vector">z&#x302;</mi></math> forms the ecliptic plane. The vertical or
+			<math><mi class="vector">y&#x302;</mi></math> axis is aligned so that the Earth orbits the
+			Sun counterclockwise from the perspective of an observer positioned on the positive
+			<math><mi class="vector">y&#x302;</mi></math> axis looking towards the origin.
+		</p>
+		<p>
+			This simulation isn't real-time. It's not even accurate. It's an
+			<math><mi>N</mi></math>-body gravitational simulation. The Sun starts out at the origin at
+			rest. All of the planets and the Moon start at their approximate real positions on
+			2023/01/01.
+		</p>
+	</div>
+</body>
+
 </html>
