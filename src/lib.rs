@@ -154,6 +154,7 @@ impl BodyAvatar {
     }
 }
 
+/// This is the controller of the simulation. It advances the simulation time and updates the view.
 // The view space distance units are in AU.
 pub struct Simulator {
     solar_system: SolarSystem,
@@ -162,6 +163,7 @@ pub struct Simulator {
 }
 
 impl Simulator {
+    /// This creates a new simulator that displays the simulation in the provided window.
     pub fn new(window: &mut Window) -> Self {
         let solar_system = SolarSystem::init(Time::from_day(EPOCH_JD));
 
