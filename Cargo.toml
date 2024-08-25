@@ -7,7 +7,7 @@ edition = "2021"
 wasm = ["dep:console_error_panic_hook", "dep:wasm-bindgen"]
 
 [dependencies]
-async-std = "1.12"
+async-std = "1"
 console_error_panic_hook = { version = "0.1", optional = true }
 kiss3d = { version = "0.35", features = ["conrod"] }
 wasm-bindgen = { version = "0.2", optional = true }
