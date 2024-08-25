@@ -15,7 +15,9 @@ impl Angle {
     pub const NAN: Self = Self { rad: f64::NAN };
 
     pub fn from_deg(deg: f64) -> Self {
-        Self { rad: Self::RAD_PER_DEG * deg }
+        Self {
+            rad: Self::RAD_PER_DEG * deg,
+        }
     }
 
     pub fn from_rad(rad: f64) -> Self {
@@ -23,7 +25,9 @@ impl Angle {
     }
 
     pub fn from_rot(rot: f64) -> Self {
-        Self { rad: consts::TAU * rot }
+        Self {
+            rad: consts::TAU * rot,
+        }
     }
 
     pub fn to_rad(self) -> f64 {
@@ -33,14 +37,18 @@ impl Angle {
     pub fn reduce(self) -> Self {
         let reduced = self.rad.rem_euclid(consts::TAU);
         if reduced > consts::PI {
-            Self { rad: reduced - consts::TAU }
+            Self {
+                rad: reduced - consts::TAU,
+            }
         } else {
             Self { rad: reduced }
         }
     }
 
     pub fn abs(&self) -> Self {
-        Self { rad: self.rad.abs() }
+        Self {
+            rad: self.rad.abs(),
+        }
     }
 
     pub fn cos(self) -> f64 {
@@ -56,11 +64,15 @@ impl Angle {
     }
 
     pub fn atan(arg: f64) -> Self {
-        Self { rad: f64::atan(arg) }
+        Self {
+            rad: f64::atan(arg),
+        }
     }
 
     pub fn max(self, other: Self) -> Self {
-        Self { rad: self.rad.max(other.rad) }
+        Self {
+            rad: self.rad.max(other.rad),
+        }
     }
 }
 
@@ -80,7 +92,9 @@ impl Add for Angle {
     type Output = Self;
 
     fn add(self, addend: Self) -> Self::Output {
-        Self { rad: self.rad + addend.rad }
+        Self {
+            rad: self.rad + addend.rad,
+        }
     }
 }
 
@@ -88,7 +102,9 @@ impl Sub for Angle {
     type Output = Self;
 
     fn sub(self, subtrahend: Self) -> Self::Output {
-        Self { rad: self.rad - subtrahend.rad }
+        Self {
+            rad: self.rad - subtrahend.rad,
+        }
     }
 }
 
@@ -102,7 +118,9 @@ impl Mul<Angle> for f64 {
     type Output = Angle;
 
     fn mul(self, multiplicand: Angle) -> Self::Output {
-        Angle { rad: self * multiplicand.rad }
+        Angle {
+            rad: self * multiplicand.rad,
+        }
     }
 }
 
@@ -119,19 +137,27 @@ impl Displacement {
     pub const MM_PER_IN: f64 = 25.4;
 
     pub fn from_au(au: f64) -> Self {
-        Self { m: Self::M_PER_AU * au }
+        Self {
+            m: Self::M_PER_AU * au,
+        }
     }
 
     pub fn from_gm(gm: f64) -> Self {
-        Self { m: Self::M_PER_GM * gm }
+        Self {
+            m: Self::M_PER_GM * gm,
+        }
     }
 
     pub fn from_in(inch: f64) -> Self {
-        Self { m: Self::M_PER_MM * Self::MM_PER_IN * inch }
+        Self {
+            m: Self::M_PER_MM * Self::MM_PER_IN * inch,
+        }
     }
 
     pub fn from_km(km: f64) -> Self {
-        Self { m: Self::M_PER_KM * km }
+        Self {
+            m: Self::M_PER_KM * km,
+        }
     }
 
     pub fn from_m(m: f64) -> Self {
@@ -147,7 +173,9 @@ impl Displacement {
     }
 
     pub fn max(self, other: Self) -> Self {
-        Self { m: self.m.max(other.m) }
+        Self {
+            m: self.m.max(other.m),
+        }
     }
 }
 
@@ -155,7 +183,9 @@ impl Add for Displacement {
     type Output = Self;
 
     fn add(self, addend: Self) -> Self::Output {
-        Self { m: self.m + addend.m }
+        Self {
+            m: self.m + addend.m,
+        }
     }
 }
 
@@ -163,7 +193,9 @@ impl Mul<f64> for Displacement {
     type Output = Self;
 
     fn mul(self, multiplicand: f64) -> Self::Output {
-        Self { m: self.m * multiplicand }
+        Self {
+            m: self.m * multiplicand,
+        }
     }
 }
 
@@ -171,7 +203,9 @@ impl Mul<Displacement> for f64 {
     type Output = Displacement;
 
     fn mul(self, multiplicand: Displacement) -> Self::Output {
-        Displacement { m: self * multiplicand.m }
+        Displacement {
+            m: self * multiplicand.m,
+        }
     }
 }
 
@@ -187,10 +221,11 @@ impl Div<f64> for Displacement {
     type Output = Self;
 
     fn div(self, divisor: f64) -> Self::Output {
-        Self { m : self.m / divisor }
+        Self {
+            m: self.m / divisor,
+        }
     }
 }
-
 
 #[derive(Clone, Copy)]
 pub struct Mass {
@@ -211,7 +246,9 @@ impl Add for Mass {
     type Output = Self;
 
     fn add(self, addend: Self) -> Self::Output {
-        Self { kg: self.kg + addend.kg }
+        Self {
+            kg: self.kg + addend.kg,
+        }
     }
 }
 
@@ -229,7 +266,9 @@ impl Time {
     pub const NAN: Self = Self { s: f64::NAN };
 
     pub fn from_day(day: f64) -> Self {
-        Self { s: Self::S_PER_DAY * day }
+        Self {
+            s: Self::S_PER_DAY * day,
+        }
     }
 
     pub fn from_s(s: f64) -> Self {
@@ -329,7 +368,12 @@ mod tests {
 
     #[test]
     fn test_displacement_max() {
-        assert_eq!(Displacement::from_m(-2.).max(Displacement::from_m(1.)).to_m(), 1.)
+        assert_eq!(
+            Displacement::from_m(-2.)
+                .max(Displacement::from_m(1.))
+                .to_m(),
+            1.
+        )
     }
 
     #[test]

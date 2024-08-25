@@ -5,7 +5,7 @@ extern crate kiss3d;
 use kiss3d::camera::{Camera, FirstPerson};
 use kiss3d::conrod::{color, Color};
 use kiss3d::light::Light;
-use kiss3d::nalgebra::{Vector3, Vector2, Translation3, Point3, Reflection};
+use kiss3d::nalgebra::{Point3, Reflection, Translation3, Vector2, Vector3};
 use kiss3d::planar_camera::PlanarCamera;
 use kiss3d::post_processing::post_processing_effect::PostProcessingEffect;
 use kiss3d::renderer::Renderer;
