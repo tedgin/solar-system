@@ -1,10 +1,12 @@
-use kiss3d::nalgebra::{Rotation3, Vector3};
+use std::{
+    cmp::Eq,
+    collections::HashMap,
+    fmt::{Debug, Formatter, Result},
+};
+
+use nalgebra::{Rotation3, Vector3};
 
 use crate::measures::*;
-use std::cmp::Eq;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter, Result};
-use std::rc::{Rc, Weak};
 
 const G: f64 = 6.67430e-11; // m³/kg/s²
 const TOL: f64 = 1e-8;
@@ -44,9 +46,7 @@ mod asserts {
             }
         };
     }
-    use kiss3d::nalgebra::ArrayStorage;
-    use kiss3d::nalgebra::Const;
-    use kiss3d::nalgebra::Vector;
+    use nalgebra::{ArrayStorage, Const, Vector};
 
     pub use crate::assert_abs_eq;
 
@@ -73,18 +73,12 @@ mod asserts {
 }
 
 mod kepler_orbit {
-    use std::f64::consts;
-
-    use kiss3d::nalgebra::Vector2;
-
     use crate::measures::{Angle, Displacement, Mass, Time, Velocity};
+    use nalgebra::Vector2;
+    use std::f64::consts;
 
     pub fn apsis(eccentricity: f64, semimajor_axis: Displacement) -> Displacement {
         (1. + eccentricity) * semimajor_axis
-    }
-
-    pub fn periapsis(eccentricity: f64, semimajor_axis: Displacement) -> Displacement {
-        (1. - eccentricity) * semimajor_axis
     }
 
     pub fn period(primary_mass: Mass, satellite_mass: Mass, semimajor_axis: Displacement) -> Time {
@@ -284,9 +278,10 @@ pub enum Body {
 }
 
 pub struct BodyProperties {
+    luminosity: LuminousFlux,
     mass: Mass,
     radius: Displacement,
-    primary: Weak<Self>,
+    primary: Option<Box<Self>>,
     eccentricity: f64,
     semimajor_axis: Displacement,
     inclination: Angle,
@@ -296,30 +291,43 @@ pub struct BodyProperties {
     epoch: Time,
 }
 
+impl Default for BodyProperties {
+    fn default() -> Self {
+        Self {
+            luminosity: LuminousFlux::default(),
+            mass: Mass::default(),
+            radius: Displacement::default(),
+            primary: Option::default(),
+            eccentricity: f64::NAN,
+            semimajor_axis: Displacement::default(),
+            inclination: Angle::NAN,
+            ascending_node: Angle::NAN,
+            periapsis_argument: Angle::NAN,
+            periapsis_time: Time::NAN,
+            epoch: Time::default(),
+        }
+    }
+}
+
 // All property values are correct as of 2023/01/01.
 // J2000 reference frame for Sun and planets and ECI for Moon both using the
 // ecliptic plane.
 impl BodyProperties {
     fn sun(epoch: Time) -> Self {
         Self {
+            luminosity: LuminousFlux::from_lm(3.6E28),
             mass: Mass::from_kg(1.988_5e30),
             radius: Displacement::from_km(695_700.),
-            primary: Weak::new(),
-            eccentricity: f64::NAN,
-            semimajor_axis: Displacement::from_m(0.),
-            inclination: Angle::NAN,
-            ascending_node: Angle::NAN,
-            periapsis_argument: Angle::NAN,
-            periapsis_time: Time::NAN,
             epoch,
+            ..Default::default()
         }
     }
 
-    fn earth(epoch: Time, sun: Weak<Self>) -> Self {
+    fn earth(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(5.972_17e24),
             radius: Displacement::from_km(6_371.0),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.016_708_6,
             semimajor_axis: Displacement::from_km(149_598_023.),
             inclination: Angle::from_deg(0.000_05),
@@ -327,14 +335,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(114.207_83),
             periapsis_time: Time::from_day(2_459_947.368_234_879_337),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn moon(epoch: Time, earth: Weak<Self>) -> Self {
+    fn moon(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(7.342e22),
             radius: Displacement::from_km(1_737.4),
-            primary: earth,
+            primary: Some(Box::new(BodyProperties::earth(epoch))),
             eccentricity: 0.054_9,
             semimajor_axis: Displacement::from_km(384_399.),
             inclination: Angle::from_deg(5.145),
@@ -342,14 +351,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(323.885_283_505_282_2).reduce(),
             periapsis_time: Time::from_day(2_459_912.416_812_194_511),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn jupiter(epoch: Time, sun: Weak<Self>) -> Self {
+    fn jupiter(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(1.898_2e27),
             radius: Displacement::from_km(69_911.),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.048_9,
             semimajor_axis: Displacement::from_gm(778.479),
             inclination: Angle::from_deg(1.303),
@@ -357,14 +367,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(273.867).reduce(),
             periapsis_time: Time::from_day(2_459_751.897_397_325_840),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn mars(epoch: Time, sun: Weak<Self>) -> Self {
+    fn mars(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(6.417_1e23),
             radius: Displacement::from_km(3_389.5),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.093_4,
             semimajor_axis: Displacement::from_km(227_939_366.),
             inclination: Angle::from_deg(1.850),
@@ -372,14 +383,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(286.5).reduce(),
             periapsis_time: Time::from_day(2_459_751.897_397_325_840),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn mercury(epoch: Time, sun: Weak<Self>) -> Self {
+    fn mercury(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(3.301_1e23),
             radius: Displacement::from_km(2_439.7),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.205_630,
             semimajor_axis: Displacement::from_km(57_909_050.),
             inclination: Angle::from_deg(7.005),
@@ -387,14 +399,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(29.124),
             periapsis_time: Time::from_day(2_459_947.345_508_896_280),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn neptune(epoch: Time, sun: Weak<Self>) -> Self {
+    fn neptune(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(1.024_13e26),
             radius: Displacement::from_km(24_622.),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.008_678,
             semimajor_axis: Displacement::from_km(4.50e9),
             inclination: Angle::from_deg(1.770),
@@ -402,14 +415,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(273.187).reduce(),
             periapsis_time: Time::from_day(2_464_955.570_929_014_124),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn saturn(epoch: Time, sun: Weak<Self>) -> Self {
+    fn saturn(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(5.683_4e26),
             radius: Displacement::from_km(58_232.),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.056_5,
             semimajor_axis: Displacement::from_km(1_433.53e6),
             inclination: Angle::from_deg(2.485),
@@ -417,14 +431,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(339.392).reduce(),
             periapsis_time: Time::from_day(2_459_751.897_397_325_840),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn uranus(epoch: Time, sun: Weak<Self>) -> Self {
+    fn uranus(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(8.681_0e25),
             radius: Displacement::from_km(25_362.),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.047_17,
             semimajor_axis: Displacement::from_gm(2_870.972),
             inclination: Angle::from_deg(0.773),
@@ -432,14 +447,15 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(96.998_857),
             periapsis_time: Time::from_day(2_469_819.223_219_580_948),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn venus(epoch: Time, sun: Weak<Self>) -> Self {
+    fn venus(epoch: Time) -> Self {
         Self {
             mass: Mass::from_kg(4.867_5e24),
             radius: Displacement::from_km(6_051.8),
-            primary: sun,
+            primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.006_772,
             semimajor_axis: Displacement::from_km(108_208_000.),
             inclination: Angle::from_deg(3.394_58),
@@ -447,55 +463,27 @@ impl BodyProperties {
             periapsis_argument: Angle::from_deg(54.884),
             periapsis_time: Time::from_day(2_460_051.982_227_367_815),
             epoch,
+            ..Default::default()
         }
     }
 
-    fn solar_system_bodies(epoch: Time) -> HashMap<Body, Rc<Self>> {
+    fn solar_system_bodies(epoch: Time) -> HashMap<Body, Self> {
         let mut bodies = HashMap::new();
-
-        bodies.insert(Body::Sun, Rc::new(BodyProperties::sun(epoch)));
-
-        let sun = Rc::downgrade(bodies.get(&Body::Sun).unwrap());
-        bodies.insert(
-            Body::Mercury,
-            Rc::new(BodyProperties::mercury(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Venus,
-            Rc::new(BodyProperties::venus(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Earth,
-            Rc::new(BodyProperties::earth(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Mars,
-            Rc::new(BodyProperties::mars(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Jupiter,
-            Rc::new(BodyProperties::jupiter(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Saturn,
-            Rc::new(BodyProperties::saturn(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Uranus,
-            Rc::new(BodyProperties::uranus(epoch, sun.clone())),
-        );
-        bodies.insert(
-            Body::Neptune,
-            Rc::new(BodyProperties::neptune(epoch, sun.clone())),
-        );
-
-        let earth = Rc::downgrade(bodies.get(&Body::Earth).unwrap());
-        bodies.insert(
-            Body::Moon,
-            Rc::new(BodyProperties::moon(epoch, earth.clone())),
-        );
-
+        bodies.insert(Body::Sun, BodyProperties::sun(epoch));
+        bodies.insert(Body::Mercury, BodyProperties::mercury(epoch));
+        bodies.insert(Body::Venus, BodyProperties::venus(epoch));
+        bodies.insert(Body::Earth, BodyProperties::earth(epoch));
+        bodies.insert(Body::Mars, BodyProperties::mars(epoch));
+        bodies.insert(Body::Jupiter, BodyProperties::jupiter(epoch));
+        bodies.insert(Body::Saturn, BodyProperties::saturn(epoch));
+        bodies.insert(Body::Uranus, BodyProperties::uranus(epoch));
+        bodies.insert(Body::Neptune, BodyProperties::neptune(epoch));
+        bodies.insert(Body::Moon, BodyProperties::moon(epoch));
         bodies
+    }
+
+    pub fn luminosity(&self) -> LuminousFlux {
+        self.luminosity
     }
 
     pub fn radius(&self) -> Displacement {
@@ -503,21 +491,14 @@ impl BodyProperties {
     }
 
     pub fn apsis(&self) -> Displacement {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Displacement::from_m(0.),
             Some(_) => kepler_orbit::apsis(self.eccentricity, self.semimajor_axis),
         }
     }
 
-    pub fn periapsis(&self) -> Displacement {
-        match self.primary.upgrade() {
-            None => Displacement::from_m(0.),
-            Some(_) => kepler_orbit::periapsis(self.eccentricity, self.semimajor_axis),
-        }
-    }
-
     fn eccentric_anomaly(&self) -> Angle {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Angle::NAN,
             Some(primary) => {
                 let t = kepler_orbit::period(primary.mass, self.mass, self.semimajor_axis);
@@ -530,7 +511,7 @@ impl BodyProperties {
     }
 
     fn orbit_to_ecliptic(&self, vector: &Vector3<f64>) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => *vector,
             Some(_) => orbit_to_ecliptic(
                 self.inclination,
@@ -542,14 +523,14 @@ impl BodyProperties {
     }
 
     fn true_anomaly(&self) -> Angle {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Angle::NAN,
             Some(_) => kepler_orbit::true_anomaly(self.eccentricity, self.eccentric_anomaly()),
         }
     }
 
     fn orbital_distance(&self) -> Displacement {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Displacement::from_m(0.),
             Some(_) => kepler_orbit::radial_distance(
                 self.semimajor_axis,
@@ -560,7 +541,7 @@ impl BodyProperties {
     }
 
     fn orbital_position(&self) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(_) => {
                 let pos_2 = kepler_orbit::position(self.orbital_distance(), self.true_anomaly());
@@ -570,21 +551,21 @@ impl BodyProperties {
     }
 
     fn primary_ecliptic_position(&self) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(_) => self.orbit_to_ecliptic(&self.orbital_position()),
         }
     }
 
     fn sun_ecliptic_position(&self, time: Time) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(primary) => primary.sun_ecliptic_position(time) + self.primary_ecliptic_position(),
         }
     }
 
     fn orbital_velocity(&self) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(primary) => {
                 let orbital_distance = self.orbital_distance();
@@ -602,14 +583,14 @@ impl BodyProperties {
     }
 
     fn primary_ecliptic_velocity(&self) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(_) => self.orbit_to_ecliptic(&self.orbital_velocity()),
         }
     }
 
     fn sun_ecliptic_velocity(&self, time: Time) -> Vector3<f64> {
-        match self.primary.upgrade() {
+        match &self.primary {
             None => Vector3::zeros(),
             Some(primary) => primary.sun_ecliptic_velocity(time) + self.primary_ecliptic_velocity(),
         }
@@ -637,6 +618,10 @@ impl OrbitalState {
         &self.position
     }
 
+    pub fn velocity(&self) -> &Vector3<f64> {
+        &self.velocity
+    }
+
     fn apply_force(&mut self, force: &Vector3<f64>, dt: f64) {
         self.velocity += force * dt / self.mass.to_kg();
         self.position += self.velocity * dt;
@@ -651,7 +636,7 @@ impl Debug for OrbitalState {
 
 pub struct SolarSystem {
     bodies: Vec<Body>,
-    body_properties: HashMap<Body, Rc<BodyProperties>>,
+    body_properties: HashMap<Body, BodyProperties>,
     body_states: Vec<OrbitalState>,
     time: f64,
 }
@@ -721,9 +706,18 @@ impl SolarSystem {
         panic!("unknown celestial body");
     }
 
+    pub fn velocity_of(&self, body: Body) -> &Vector3<f64> {
+        for state in self.body_states.iter() {
+            if state.body == body {
+                return state.velocity();
+            }
+        }
+        panic!("unknown celestial body");
+    }
+
     // Return the properties for a requested body
     pub fn properties_of(&self, body: Body) -> &BodyProperties {
-        self.body_properties.get(&body).unwrap().as_ref()
+        self.body_properties.get(&body).unwrap()
     }
 }
 
@@ -794,105 +788,6 @@ mod tests {
             &orbit,
         );
         assert_rel_eq!(act, orbit)
-    }
-
-    #[test]
-    fn test_body_properties_earth() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let earth = BodyProperties::earth(epoch(), Rc::downgrade(&sun));
-        assert!(earth.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_jupiter() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let jupiter = BodyProperties::jupiter(epoch(), Rc::downgrade(&sun));
-        assert!(jupiter.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_mars() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let mars = BodyProperties::mars(epoch(), Rc::downgrade(&sun));
-        assert!(mars.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_mercury() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let mercury = BodyProperties::mercury(epoch(), Rc::downgrade(&sun));
-        assert!(mercury.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_moon() {
-        let primary = Rc::new(BodyProperties::sun(epoch()));
-        let moon = BodyProperties::moon(epoch(), Rc::downgrade(&primary));
-        assert!(moon.primary.ptr_eq(&Rc::downgrade(&primary)))
-    }
-
-    #[test]
-    fn test_body_properties_neptune() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let neptune = BodyProperties::neptune(epoch(), Rc::downgrade(&sun));
-        assert!(neptune.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_saturn() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let saturn = BodyProperties::saturn(epoch(), Rc::downgrade(&sun));
-        assert!(saturn.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_sun() {
-        assert!(BodyProperties::sun(epoch()).primary.upgrade().is_none())
-    }
-
-    #[test]
-    fn test_body_properties_uranus() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let uranus = BodyProperties::uranus(epoch(), Rc::downgrade(&sun));
-        assert!(uranus.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_venus() {
-        let sun = Rc::new(BodyProperties::sun(epoch()));
-        let venus = BodyProperties::venus(epoch(), Rc::downgrade(&sun));
-        assert!(venus.primary.ptr_eq(&Rc::downgrade(&sun)))
-    }
-
-    #[test]
-    fn test_body_properties_solar_system_entities() {
-        let ss = BodyProperties::solar_system_bodies(epoch());
-        let sun = ss.get(&Body::Sun).unwrap();
-
-        let planets = [
-            Body::Mercury,
-            Body::Venus,
-            Body::Earth,
-            Body::Mars,
-            Body::Jupiter,
-            Body::Saturn,
-            Body::Uranus,
-            Body::Neptune,
-        ];
-        for planet in planets.iter() {
-            assert!(
-                ss.get(planet).unwrap().primary.ptr_eq(&Rc::downgrade(sun)),
-                "{:?} should have Sun as its primary",
-                planet
-            );
-        }
-
-        let moon = ss.get(&Body::Moon).unwrap();
-        let earth = ss.get(&Body::Earth).unwrap();
-        assert!(
-            moon.primary.ptr_eq(&Rc::downgrade(earth)),
-            "Moon should have Earth as its primary"
-        );
     }
 
     #[test]

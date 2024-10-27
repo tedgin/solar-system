@@ -1,293 +1,426 @@
-use std::collections::HashMap;
-use std::{f32, f64};
-
-extern crate kiss3d;
-use kiss3d::camera::{Camera, FirstPerson};
-use kiss3d::conrod::{color, Color};
-use kiss3d::light::Light;
-use kiss3d::nalgebra::{Point3, Reflection, Translation3, Vector2, Vector3};
-use kiss3d::planar_camera::PlanarCamera;
-use kiss3d::post_processing::post_processing_effect::PostProcessingEffect;
-use kiss3d::renderer::Renderer;
-use kiss3d::scene::SceneNode;
-use kiss3d::text::Font;
-use kiss3d::window::{State, Window};
+use bevy::{
+    core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
+    ecs::component::{ComponentHooks, StorageType},
+    prelude::*,
+    utils::HashMap,
+    window::{PrimaryWindow, WindowMode},
+};
+use bevy_mod_billboard::prelude::*;
+use bevy_framepace::FramepacePlugin;
 
 mod measures;
 use measures::{Angle, Displacement, Time};
 
 mod simulation;
-use simulation::{Body, BodyProperties, SolarSystem};
+use simulation::{Body, SolarSystem};
 
-// kiss3d::camera::FirstPerson default FOV
-const FOV_DEFAULT: f32 = f32::consts::FRAC_PI_4;
+// The radius of the rendering volume in AU.
+const WORLD_RADIUS_AU: f32 = 100.;
 
-// The relative amount the view frustrum needs to extend beyond the view space.
-const FRUSTRUM_EASEMENT: f64 = 1.1;
+// Twice the minimum angular resolution in radians of the human eye
+const EYE_ANG_RES_RAD: f32 = 3e-4 * 2.;
 
-// The relative amount the light has to be above the surface of the Sun to give
-// the illusion that the Sun's avatar is glowing.
-const LIGHT_EASEMENT: f64 = 2.;
+// The minimum distance in meters someone typically sits away from a laptop display.
+const MIN_OBSERVER_DIST_M: f32 = 0.3;
 
-const EPOCH_JD: f64 = 2_459_945.5; // Julian Date in days for 2023-01-01T00:00:00 UTC
+// The standard DPI of a monitor
+const STANDARD_DPI: f32 = 96.;
 
-const DT: f64 = 3600.;
+// The minimum distance in AU away from the camera for an object to be rendered
+const ZNEAR_AU: f32 = 0.001;
 
-const PT_PER_IN: f64 = 72.;
-const STANDARD_DPI: f64 = 96.;
-const TEXT_SIZE_PT: f64 = 6.;
-const LOGICAL_TEXT_SIZE_PX: f64 = TEXT_SIZE_PT * STANDARD_DPI / PT_PER_IN;
+// The maximum distance in AU away from the camera for an object to be rendered
+const ZFAR_AU: f32 = 100.;
 
-// The minimum angular resolution of the human eye, doubled
-const EYE_ANGULAR_RES: f64 = 3e-4 * 2.; // rad
-const MIN_OBSERVER_DIST: f64 = 0.3; // m
+// The scaling to prevent the Sun's light from saturating the camera and causing distortions
+const LUMINOSITY_SCALE: f32 = 1e-26;
 
-fn min_angular_res(window: &Window) -> Angle {
-    let pixel_size = Displacement::from_in(1. / (STANDARD_DPI * window.scale_factor()));
-    let obs_dist = Displacement::from_m(MIN_OBSERVER_DIST);
-    let screen_angular_res = 2. * Angle::atan(pixel_size / (2. * obs_dist));
-    Angle::from_rad(EYE_ANGULAR_RES).max(screen_angular_res)
+// The offset of the label below the body in normalized device units
+const LABEL_OFFSET: f32 = 0.03;
+
+// The scaling applied to the labels to get the to an appropriate size.
+const LABEL_SCALE: f32 = 0.0003;
+
+// Manages the visual display properties of a body
+struct BodyVisual {
+    name: String,
+    color: Color,
 }
 
-fn avatar_color(body: Body) -> Color {
-    match body {
-        Body::Earth => color::BLUE,
-        Body::Jupiter => color::rgb(1., 0.9, 0.7),
-        Body::Mars => color::RED,
-        Body::Mercury => color::grayscale(0.5),
-        Body::Moon => color::WHITE,
-        Body::Neptune => color::rgb(0.5, 0.5, 1.),
-        Body::Saturn => color::rgb(0.8, 0.7, 0.5),
-        Body::Sun => color::YELLOW,
-        Body::Uranus => color::rgb(0.9, 0.9, 1.),
-        Body::Venus => color::grayscale(0.8),
-    }
-}
-
-fn avatar_label(body: Body) -> &'static str {
-    match body {
-        Body::Earth => "Earth",
-        Body::Jupiter => "Jupiter",
-        Body::Mars => "Mars",
-        Body::Mercury => "Mercury",
-        Body::Moon => "Moon",
-        Body::Neptune => "Neptune",
-        Body::Saturn => "Saturn",
-        Body::Sun => "Sun",
-        Body::Uranus => "Uranus",
-        Body::Venus => "Venus",
-    }
-}
-
-struct BodyAvatar {
-    node: SceneNode,
-    radius: Displacement,
-    label: String,
-}
-
-impl BodyAvatar {
-    fn new(
-        properties: &BodyProperties,
-        color: &Color,
-        label: &str,
-        min_radius: Displacement,
-        window: &mut Window,
-    ) -> BodyAvatar {
-        let radius = properties.radius().max(min_radius);
-        let mut node = window.add_sphere(radius.to_au() as f32);
-        node.set_color(color.red(), color.green(), color.blue());
-
-        BodyAvatar {
-            node,
-            radius,
-            label: String::from(label),
+impl BodyVisual {
+    pub fn new(name: &str, color: &Color) -> Self {
+        Self {
+            name: name.to_string(),
+            color: *color,
         }
     }
 
-    fn mk_avatars(window: &mut Window, solar_system: &SolarSystem) -> HashMap<Body, BodyAvatar> {
-        let min_angle = min_angular_res(window);
-        let mut avatars: HashMap<Body, BodyAvatar> = HashMap::new();
-        for body in [
-            Body::Sun,
-            Body::Moon,
-            Body::Mercury,
-            Body::Venus,
-            Body::Mars,
-            Body::Jupiter,
-            Body::Saturn,
-            Body::Uranus,
-            Body::Neptune,
-        ] {
-            let properties = solar_system.properties_of(body);
-            let max_dist = match body {
-                Body::Moon => properties.apsis(),
-                _ => {
-                    let earth = solar_system.properties_of(Body::Earth);
-                    properties.apsis() + earth.apsis()
-                }
-            };
-            let avatar = BodyAvatar::new(
-                solar_system.properties_of(body),
-                &avatar_color(body),
-                avatar_label(body),
-                max_dist * min_angle.tan() / 2.,
-                window,
-            );
-            avatars.insert(body, avatar);
-        }
-
-        avatars
+    pub fn name(&self) -> &String {
+        &self.name
     }
 
-    fn label(&self) -> &str {
-        self.label.as_str()
-    }
-
-    fn radius(&self) -> Displacement {
-        self.radius
-    }
-
-    fn update_position(&mut self, position: &Vector3<f64>) {
-        self.node.set_local_translation(Translation3::from(
-            (position / Displacement::M_PER_AU).cast::<f32>(),
-        ));
+    pub fn color(&self) -> &Color {
+        &self.color
     }
 }
 
-/// This is the controller of the simulation. It advances the simulation time and updates the view.
-// The view space distance units are in AU.
-pub struct Simulator {
+#[derive(Resource)]
+struct Simulation {
     solar_system: SolarSystem,
-    body_avatars: HashMap<Body, BodyAvatar>,
-    camera: FirstPerson,
+    body_visuals: HashMap<Body, BodyVisual>,
 }
 
-impl Simulator {
-    /// This creates a new simulator that displays the simulation in the provided window.
-    pub fn new(window: &mut Window) -> Self {
-        let solar_system = SolarSystem::init(Time::from_day(EPOCH_JD));
+// This provides an interface to the solar system model. It ensures all the data types match those
+// expected by bevy, and it ensures that the coordinate system and units are consistent with the
+// World.
+impl Simulation {
 
-        let earth_apsis = solar_system.properties_of(Body::Earth).apsis();
-        let neptune_apsis = solar_system.properties_of(Body::Neptune).apsis();
-        let view_depth = earth_apsis + neptune_apsis;
+    // The simulation time step size in seconds
+    const DT: f64 = 1800.;  // half an hour
 
-        let body_avatars = BodyAvatar::mk_avatars(window, &solar_system);
+    // The Julian Date when the simulation begins (2023-01-01T00:00:00 UTC)
+    const EPOCH_JD: f64 = 2_459_945.5;
 
-        let znear = solar_system.properties_of(Body::Moon).periapsis()
-            * f64::cos(FOV_DEFAULT as f64 / 2.)
-            / FRUSTRUM_EASEMENT;
-        let zfar = view_depth * FRUSTRUM_EASEMENT;
+    pub fn init() -> Self {
+        let mut visuals = HashMap::new();
 
-        let mut camera = FirstPerson::new_with_frustrum(
-            FOV_DEFAULT,
-            znear.to_au() as f32,
-            zfar.to_au() as f32,
-            Point3::new(1., 0., 0.),
-            Point3::new(0., 0., 0.),
-        );
-        camera.set_up_axis_dir(Vector3::z_axis());
+        // Color has be scaled by 10 to take advantage of HDR and bloom effects
+        let sun_color = Color::srgb(9.922, 9.843, 8.275);
 
-        let mut sim = Self {
-            solar_system,
-            body_avatars,
-            camera,
+        let mercury_color = Color::srgb_u8(0x1a, 0x1a, 0x1a);
+        let venus_color = Color::srgb_u8(0xe6, 0xe6, 0xe6);
+        let earth_color = Color::srgb_u8(0x2f, 0x6a, 0x69);
+        let moon_color = Color::srgb_u8(96, 86, 74);
+        let mars_color = Color::srgb_u8(0x99, 0x3d, 0x00);
+        let jupiter_color = Color::srgb_u8(0xb0, 0x7f, 0x35);
+        let saturn_color = Color::srgb_u8(0xb0, 0x8f, 0x36);
+        let uranus_color = Color::srgb_u8(0x55, 0x80, 0xaa);
+        let neptune_color = Color::srgb_u8(0x36, 0x68, 0x96);
+        visuals.insert(Body::Sun, BodyVisual::new("Sun", &sun_color));
+        visuals.insert(Body::Mercury, BodyVisual::new("Mercury", &mercury_color));
+        visuals.insert(Body::Venus, BodyVisual::new("Venus", &venus_color));
+        visuals.insert(Body::Earth, BodyVisual::new("Earth", &earth_color));
+        visuals.insert(Body::Moon, BodyVisual::new("Moon", &moon_color));
+        visuals.insert(Body::Mars, BodyVisual::new("Mars", &mars_color));
+        visuals.insert(Body::Jupiter, BodyVisual::new("Jupiter", &jupiter_color));
+        visuals.insert(Body::Saturn, BodyVisual::new("Saturn", &saturn_color));
+        visuals.insert(Body::Uranus, BodyVisual::new("Uranus", &uranus_color));
+        visuals.insert(Body::Neptune, BodyVisual::new("Neptune", &neptune_color));
+        Self {
+            solar_system: SolarSystem::init(Time::from_day(Self::EPOCH_JD.into())),
+            body_visuals: visuals,
+        }
+    }
+
+    pub fn advance(&mut self) {
+        self.solar_system.advance_time(Self::DT);
+    }
+
+    pub fn apsis_of(&self, body: Body) -> f32 {
+        self.solar_system.properties_of(body).apsis().to_au() as f32
+    }
+
+    pub fn color_of(&self, body: Body) -> &Color {
+        self.body_visuals.get(&body).unwrap().color()
+    }
+
+    pub fn luminosity_of(&self, body: Body) -> f32 {
+        self.solar_system.properties_of(body).luminosity().to_lm() as f32
+    }
+
+    pub fn name_of(&self, body: Body) -> &String {
+        self.body_visuals.get(&body).unwrap().name()
+    }
+
+    pub fn position_of(&self, body: Body) -> Vec3 {
+        let pos = (self.solar_system.position_of(body) / Displacement::M_PER_AU).cast::<f32>();
+        Vec3::new(pos.x, pos.y, pos.z)
+    }
+
+    pub fn radius_of(&self, body: Body) -> f32 {
+        self.solar_system.properties_of(body).radius().to_au() as f32
+    }
+
+    pub fn velocity_of(&self, body: Body) -> Vec3 {
+        let model_vel = self.solar_system.velocity_of(body);
+        let world_vel = (model_vel * Time::S_PER_DAY / Displacement::M_PER_AU).cast::<f32>();
+        Vec3::new(world_vel.x, world_vel.y, world_vel.z)
+    }
+}
+
+// This function advance the time by one step in the solar system model.
+fn advance_sim_time(mut sim: ResMut<Simulation>) {
+    sim.advance();
+}
+
+impl Component for Body {
+    const STORAGE_TYPE: StorageType = StorageType::Table;
+
+    fn register_component_hooks(_hooks: &mut ComponentHooks) {}
+}
+
+// This is the view model of a celestial body.
+#[derive(Component, Default)]
+struct BodyModel {
+    position: Vec3,
+    avatar: Option<Entity>,
+    label: Option<Entity>,
+}
+
+impl BodyModel {
+    pub fn new(body: Body, sim: &Simulation) -> Self {
+        Self {
+            position: sim.position_of(body),
+            ..default()
+        }
+    }
+
+    pub fn avatar(&self) -> Option<Entity> {
+        self.avatar
+    }
+
+    pub fn set_avatar(&mut self, avatar: Entity) {
+        self.avatar = Some(avatar);
+    }
+
+    pub fn label(&self) -> Option<Entity> {
+        self.label
+    }
+
+    pub fn set_label(&mut self, label: Entity) {
+        self.label = Some(label);
+    }
+
+    pub fn position(&self) -> &Vec3 {
+        &self.position
+    }
+
+    pub fn update_position(&mut self, position: &Vec3) {
+        self.position = *position;
+    }
+}
+
+// This adds the celestial bodies being watched to the bevy World.
+fn create_body_models(sim: Res<Simulation>, mut commands: Commands) {
+    for body in [
+        Body::Sun,
+        Body::Moon,
+        Body::Mercury,
+        Body::Venus,
+        Body::Mars,
+        Body::Jupiter,
+        Body::Saturn,
+        Body::Uranus,
+        Body::Neptune,
+    ] {
+        commands.spawn((body, BodyModel::new(body, &sim)));
+    }
+}
+
+// This aligns the position of the bodies in the World with their positions in the solar system
+// model.
+fn update_bodies(sim: Res<Simulation>, mut bodies: Query<(&Body, &mut BodyModel)>) {
+    for (body, mut model) in &mut bodies {
+        model.update_position(&sim.position_of(*body));
+    }
+}
+
+fn min_ang_res(win: &Window) -> f32 {
+    let pix_size = Displacement::from_in((1. / (STANDARD_DPI * win.scale_factor())) as f64);
+    let obs_dist = Displacement::from_m(MIN_OBSERVER_DIST_M as f64);
+    let disp_ang_res = 2. * Angle::atan(pix_size / (2. * obs_dist));
+    Angle::from_rad(EYE_ANG_RES_RAD as f64).max(disp_ang_res).to_rad() as f32
+}
+
+fn create_avatars(
+    sim: Res<Simulation>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut bodies: Query<(&Body, &mut BodyModel)>,
+) {
+    let min_ang = min_ang_res(window.single());
+
+    for (body, mut model) in &mut bodies {
+        // Camera is on Earth
+        let max_dist = match body {
+            Body::Moon => sim.apsis_of(*body),
+            _ => sim.apsis_of(*body) + sim.apsis_of(Body::Earth),
         };
 
-        sim.render(window);
-
-        sim
-    }
-
-    fn render(&mut self, window: &mut Window) {
-        self.position_avatars();
-        self.orient_camera();
-        self.position_light(window);
-        self.label_bodies(window);
-    }
-
-    fn label_bodies(&mut self, window: &mut Window) {
-        let screen_dims = Vector2::new(window.width() as f32, window.height() as f32);
-        let screen_reflect = Reflection::new(Vector2::y_axis(), screen_dims[1] / 2.);
-
-        for body in self.body_avatars.keys() {
-            let world_pos = Point3::from(
-                (self.solar_system.position_of(*body) / Displacement::M_PER_AU).cast::<f32>(),
-            );
-            let view_pos = self.camera.view_transform().transform_point(&world_pos);
-
-            if view_pos[2] < 0. {
-                let mut screen_pos: Vector2<f32> = self.camera.project(&world_pos, &screen_dims);
-                screen_reflect.reflect(&mut screen_pos);
-
-                let color = avatar_color(*body);
-                // XXX - have to double the width and height of the screen. See
-                //    https://github.com/sebcrozet/kiss3d/issues/98. This is fixed in PR
-                //    https://github.com/sebcrozet/kiss3d/pull/319/.
-                // window.draw_text(
-                //     self.body_avatars.get(body).unwrap().label(),
-                //     &screen_pos.into(),
-                //     (LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
-                //     &Font::default(),
-                //     &Point3::new(color.red(), color.green(), color.blue()),
-                // );
-                window.draw_text(
-                    self.body_avatars.get(body).unwrap().label(),
-                    &(2. * screen_pos).into(),
-                    (2. * LOGICAL_TEXT_SIZE_PX * window.scale_factor()) as f32,
-                    &Font::default(),
-                    &Point3::new(color.red(), color.green(), color.blue()),
-                );
-                // XXX - ^^^
-            }
+        let min_radius = max_dist * min_ang.tan() / 2.;
+        let avatar_radius = sim.radius_of(*body).max(min_radius);
+        let avatar_color = sim.color_of(*body);
+        let avatar_lum = sim.luminosity_of(*body) * LUMINOSITY_SCALE;
+        let mut avatar = commands.spawn(PbrBundle {
+            mesh: meshes.add(Sphere::new(avatar_radius)),
+            material: materials.add(if avatar_lum > 0. {
+                StandardMaterial {
+                    emissive: (*avatar_color).into(),
+                    ..default()
+                }
+            } else {
+                StandardMaterial {
+                    base_color: *avatar_color,
+                    ..default()
+                }
+            }),
+            transform: Transform::from_translation(*model.position()),
+            ..default()
+        });
+        if avatar_lum > 0. {
+            avatar.with_children(|parent| {
+                parent.spawn(PointLightBundle {
+                    point_light: PointLight {
+                        color: *avatar_color,
+                        intensity: avatar_lum,
+                        range: WORLD_RADIUS_AU,
+                        radius: avatar_radius,
+                        shadows_enabled: true,
+                        ..default()
+                    },
+                    ..default()
+                });
+            });
         }
-    }
-
-    fn orient_camera(&mut self) {
-        let camera_pos = *self.solar_system.position_of(Body::Earth);
-
-        let eye_loc = Point3::from((camera_pos / Displacement::M_PER_AU).cast::<f32>());
-        self.camera.look_at(eye_loc, Point3::origin());
-    }
-
-    fn position_avatars(&mut self) {
-        for avatar in self.body_avatars.iter_mut() {
-            avatar
-                .1
-                .update_position(self.solar_system.position_of(*avatar.0));
-        }
-    }
-
-    fn position_light(&self, window: &mut Window) {
-        // For the Sun to appear to glow, a light needs to be placed exterior to
-        // the Sun in the direction of the camera. If the light is too close to
-        // the Sun, it looks like it is reflecting light. As the distance of the
-        // light from the Sun increases, the likelihood of a planet passing
-        // between the light and the Sun increases, ruining the glowing
-        // illusion.
-        let camera_pos = self.camera.eye().cast::<f64>();
-        let sun_pos =
-            Point3::from(self.solar_system.position_of(Body::Sun) / Displacement::M_PER_AU);
-        let sun_rad_offset = self.body_avatars.get(&Body::Sun).unwrap().radius() * LIGHT_EASEMENT;
-        let sun_disp = (1. - sun_rad_offset.to_au()) * (sun_pos - camera_pos);
-        let light_pos = camera_pos + sun_disp;
-        window.set_light(Light::Absolute(light_pos.cast::<f32>()));
+        model.set_avatar(avatar.id());
     }
 }
 
-impl State for Simulator {
-    fn cameras_and_effect_and_renderer(
-        &mut self,
-    ) -> (
-        Option<&mut dyn Camera>,
-        Option<&mut dyn PlanarCamera>,
-        Option<&mut dyn Renderer>,
-        Option<&mut dyn PostProcessingEffect>,
-    ) {
-        (Some(&mut self.camera), None, None, None)
+fn update_avatars(bodies: Query<&BodyModel, With<Body>>, mut transforms: Query<&mut Transform>) {
+    for model in &bodies {
+        let avatar = model.avatar().unwrap();
+        *transforms.get_mut(avatar).unwrap() = Transform::from_translation(*model.position());
     }
+}
 
-    fn step(&mut self, window: &mut Window) {
-        self.solar_system.advance_time(DT);
-        self.render(window);
+fn mk_lbl_transform(
+    sim: &Simulation,
+    model: &BodyModel,
+    cam: &Camera,
+    cam_trans: &GlobalTransform,
+) -> Transform {
+    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position()).unwrap();
+    let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
+    let lbl_pos = cam.ndc_to_world(cam_trans, lbl_ndc).unwrap();
+    let lbl_scale = LABEL_SCALE * model.position().distance(sim.position_of(Body::Earth));
+    Transform::from_translation(lbl_pos).with_scale(Vec3::splat(lbl_scale))
+}
+
+fn create_labels(
+    sim: Res<Simulation>,
+    mut commands: Commands,
+    mut bodies: Query<(&Body, &mut BodyModel)>,
+    cam: Query<(&Camera, &GlobalTransform)>,
+) {
+    let (cam, cam_trans) = cam.single();
+    for (body, mut model) in &mut bodies {
+        let lbl = commands.spawn(BillboardTextBundle {
+            text: Text::from_section(
+                sim.name_of(*body),
+                TextStyle {
+                    color: sim.color_of(*body).with_luminance(1.),
+                    ..default()
+                },
+            ),
+            transform: mk_lbl_transform(&sim, &model, cam, cam_trans),
+            ..default()
+        });
+        model.set_label(lbl.id());
     }
+}
+
+fn update_labels(
+    sim: Res<Simulation>,
+    bodies: Query<&BodyModel, With<Body>>,
+    cam: Query<(&Camera, &GlobalTransform)>,
+    mut transforms: Query<&mut Transform>,
+) {
+    let (cam, cam_trans) = cam.single();
+    for model in &bodies {
+        *transforms.get_mut(model.label().unwrap()).unwrap() =
+            mk_lbl_transform(&sim, model, cam, cam_trans);
+    }
+}
+
+fn mk_cam_transform(sim: &Simulation) -> Transform {
+    let cam_pos = sim.position_of(Body::Earth);
+    let focus_pos = sim.position_of(Body::Sun);
+    let z = focus_pos - cam_pos;
+    let x = -sim.velocity_of(Body::Earth);
+    let y = z.cross(x);
+    Transform::from_translation(cam_pos).looking_at(focus_pos, y)
+}
+
+fn create_camera(sim: Res<Simulation>, mut commands: Commands) {
+    commands.spawn((
+        Camera3dBundle {
+            camera: Camera {
+                hdr: true,
+                ..default()
+            },
+            projection: Projection::Perspective(PerspectiveProjection {
+                near: ZNEAR_AU,
+                far: ZFAR_AU,
+                ..default()
+            }),
+            tonemapping: Tonemapping::TonyMcMapface,
+            transform: mk_cam_transform(&sim),
+            ..default()
+        },
+        BloomSettings::NATURAL,
+    ));
+}
+
+fn update_camera(sim: Res<Simulation>, mut cam: Query<&mut Transform, With<Camera>>) {
+    *cam.single_mut() = mk_cam_transform(&sim);
+}
+
+fn quit(input: Res<ButtonInput<KeyCode>>, mut app_exit_events: ResMut<Events<AppExit>>) {
+    if input.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        && input.just_released(KeyCode::KeyC)
+    {
+        app_exit_events.send(AppExit::Success);
+    }
+}
+
+/// Run the simulation.
+pub fn run() {
+    let win_plug = WindowPlugin {
+        primary_window: Some(Window {
+            mode: WindowMode::BorderlessFullscreen,
+            ..default()
+        }),
+        ..default()
+    };
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(win_plug),
+            BillboardPlugin,
+            FramepacePlugin,
+        ))
+        .insert_resource(Simulation::init())
+        .insert_resource(ClearColor(Color::BLACK))
+        .add_systems(
+            Startup,
+            (
+                (create_body_models, create_camera),
+                (create_avatars, create_labels),
+            )
+                .chain(),
+        )
+        .add_systems(
+            FixedUpdate,
+            (
+                quit,
+                (
+                    advance_sim_time,
+                    (update_bodies, update_camera),
+                    (update_avatars, update_labels),
+                )
+                    .chain(),
+            ),
+        )
+        .run();
 }

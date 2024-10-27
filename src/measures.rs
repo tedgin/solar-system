@@ -1,7 +1,9 @@
 // TODO (deferred) replace with an existing library from crates.io
 
-use std::f64::consts;
-use std::ops::{Add, Div, Mul, Neg, Sub, SubAssign};
+use std::{
+    f64::consts,
+    ops::{Add, Div, Mul, Neg, Sub, SubAssign},
+};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct Angle {
@@ -124,7 +126,7 @@ impl Mul<Angle> for f64 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Displacement {
     m: f64,
 }
@@ -227,7 +229,22 @@ impl Div<f64> for Displacement {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd)]
+pub struct LuminousFlux {
+    lm: f64,
+}
+
+impl LuminousFlux {
+    pub fn from_lm(lm: f64) -> Self {
+        Self { lm }
+    }
+
+    pub fn to_lm(self) -> f64 {
+        self.lm
+    }
+}
+
+#[derive(Clone, Copy, Default)]
 pub struct Mass {
     kg: f64,
 }
@@ -252,7 +269,7 @@ impl Add for Mass {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Time {
     s: f64,
 }
