@@ -12,4 +12,5 @@ bevy_framepace = "0.17"
 bevy_mod_billboard = "0.7"
 #console_error_panic_hook = { version = "0.1", optional = true }
 nalgebra = "0.33"
+uom = "0.36"
 #wasm-bindgen = { version = "0.2", optional = true }

@@ -1,3 +1,5 @@
+extern crate bevy;
+
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     ecs::component::{ComponentHooks, StorageType},
@@ -5,14 +7,27 @@ use bevy::{
     utils::HashMap,
     window::{PrimaryWindow, WindowMode},
 };
+
+extern crate bevy_mod_billboard;
 use bevy_mod_billboard::prelude::*;
+
+extern crate bevy_framepace;
 use bevy_framepace::FramepacePlugin;
 
-mod measures;
-use measures::{Angle, Displacement, Time};
+extern crate uom;
+use uom::si::{
+    angle::radian,
+    f32::{Angle, Length},
+    f64,
+    length::{astronomical_unit, inch, meter},
+    time::day,
+};
 
 mod simulation;
 use simulation::{Body, SolarSystem};
+
+// TODO: Create astronomical_unit_per_day velocity unit.
+const MPS_TO_AUPD: f64 = 86400. / 1.495_979_E11;
 
 // The radius of the rendering volume in AU.
 const WORLD_RADIUS_AU: f32 = 100.;
@@ -74,9 +89,8 @@ struct Simulation {
 // expected by bevy, and it ensures that the coordinate system and units are consistent with the
 // World.
 impl Simulation {
-
     // The simulation time step size in seconds
-    const DT: f64 = 1800.;  // half an hour
+    const DT: f64 = 1800.; // half an hour
 
     // The Julian Date when the simulation begins (2023-01-01T00:00:00 UTC)
     const EPOCH_JD: f64 = 2_459_945.5;
@@ -107,7 +121,7 @@ impl Simulation {
         visuals.insert(Body::Uranus, BodyVisual::new("Uranus", &uranus_color));
         visuals.insert(Body::Neptune, BodyVisual::new("Neptune", &neptune_color));
         Self {
-            solar_system: SolarSystem::init(Time::from_day(Self::EPOCH_JD.into())),
+            solar_system: SolarSystem::init(f64::Time::new::<day>(Self::EPOCH_JD)),
             body_visuals: visuals,
         }
     }
@@ -117,7 +131,10 @@ impl Simulation {
     }
 
     pub fn apsis_of(&self, body: Body) -> f32 {
-        self.solar_system.properties_of(body).apsis().to_au() as f32
+        self.solar_system
+            .properties_of(body)
+            .apsis()
+            .get::<astronomical_unit>() as f32
     }
 
     pub fn color_of(&self, body: Body) -> &Color {
@@ -125,7 +142,7 @@ impl Simulation {
     }
 
     pub fn luminosity_of(&self, body: Body) -> f32 {
-        self.solar_system.properties_of(body).luminosity().to_lm() as f32
+        self.solar_system.properties_of(body).luminosity().value as f32
     }
 
     pub fn name_of(&self, body: Body) -> &String {
@@ -133,17 +150,23 @@ impl Simulation {
     }
 
     pub fn position_of(&self, body: Body) -> Vec3 {
-        let pos = (self.solar_system.position_of(body) / Displacement::M_PER_AU).cast::<f32>();
-        Vec3::new(pos.x, pos.y, pos.z)
+        let pos = self.solar_system.position_of(body);
+        Vec3::new(
+            f64::Length::new::<meter>(pos.x).get::<astronomical_unit>() as f32,
+            f64::Length::new::<meter>(pos.y).get::<astronomical_unit>() as f32,
+            f64::Length::new::<meter>(pos.z).get::<astronomical_unit>() as f32,
+        )
     }
 
     pub fn radius_of(&self, body: Body) -> f32 {
-        self.solar_system.properties_of(body).radius().to_au() as f32
+        self.solar_system
+            .properties_of(body)
+            .radius()
+            .get::<astronomical_unit>() as f32
     }
 
     pub fn velocity_of(&self, body: Body) -> Vec3 {
-        let model_vel = self.solar_system.velocity_of(body);
-        let world_vel = (model_vel * Time::S_PER_DAY / Displacement::M_PER_AU).cast::<f32>();
+        let world_vel = (self.solar_system.velocity_of(body) * MPS_TO_AUPD).cast::<f32>();
         Vec3::new(world_vel.x, world_vel.y, world_vel.z)
     }
 }
@@ -226,10 +249,12 @@ fn update_bodies(sim: Res<Simulation>, mut bodies: Query<(&Body, &mut BodyModel)
 }
 
 fn min_ang_res(win: &Window) -> f32 {
-    let pix_size = Displacement::from_in((1. / (STANDARD_DPI * win.scale_factor())) as f64);
-    let obs_dist = Displacement::from_m(MIN_OBSERVER_DIST_M as f64);
-    let disp_ang_res = 2. * Angle::atan(pix_size / (2. * obs_dist));
-    Angle::from_rad(EYE_ANG_RES_RAD as f64).max(disp_ang_res).to_rad() as f32
+    let pix_size = Length::new::<inch>(1. / (STANDARD_DPI * win.scale_factor()));
+    let obs_dist = Length::new::<meter>(MIN_OBSERVER_DIST_M);
+    let disp_ang_res = 2. * (pix_size / (2. * obs_dist)).atan();
+    Angle::new::<radian>(EYE_ANG_RES_RAD)
+        .max(disp_ang_res)
+        .get::<radian>()
 }
 
 fn create_avatars(

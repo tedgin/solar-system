@@ -1,14 +1,36 @@
+use core::f64;
 use std::{
     cmp::Eq,
     collections::HashMap,
     fmt::{Debug, Formatter, Result},
+    marker::PhantomData,
 };
 
 use nalgebra::{Rotation3, Vector3};
 
-use crate::measures::*;
+use uom::{
+    si::{
+        angle::{degree, radian, revolution},
+        f64::{Angle, Length, LuminousIntensity, Mass, SolidAngle, Time},
+        length::{gigameter, kilometer, meter},
+        luminous_intensity::candela,
+        mass::kilogram,
+        solid_angle::steradian,
+        time::{day, second},
+        Quantity, ISQ, SI,
+    },
+    typenum::{N1, N2, P1, P3, Z0},
+};
 
-const G: f64 = 6.67430e-11; // m³/kg/s²
+// TODO: propose this as a new derived quantity to uom
+pub type LuminousFlux = Quantity<ISQ<Z0, Z0, Z0, Z0, Z0, Z0, P1>, SI<f64>, f64>;
+
+const G: Quantity<ISQ<P3, N1, N2, Z0, Z0, Z0, Z0>, SI<f64>, f64> = Quantity {
+    dimension: PhantomData,
+    units: PhantomData,
+    value: 6.67430e-11, // m³/kg/s²
+};
+
 const TOL: f64 = 1e-8;
 
 #[cfg(test)]
@@ -73,108 +95,128 @@ mod asserts {
 }
 
 mod kepler_orbit {
-    use crate::measures::{Angle, Displacement, Mass, Time, Velocity};
-    use nalgebra::Vector2;
+    use core::f64;
     use std::f64::consts;
 
-    pub fn apsis(eccentricity: f64, semimajor_axis: Displacement) -> Displacement {
+    use nalgebra::Vector2;
+    use uom::{
+        si::{
+            angle::{radian, revolution},
+            f64::{Angle, Length, Mass, Time, Velocity},
+            length::meter,
+            ratio::ratio,
+            velocity::meter_per_second,
+        },
+        typenum::P3,
+    };
+
+    pub fn apsis(eccentricity: f64, semimajor_axis: Length) -> Length {
         (1. + eccentricity) * semimajor_axis
     }
 
-    pub fn period(primary_mass: Mass, satellite_mass: Mass, semimajor_axis: Displacement) -> Time {
-        let m = (primary_mass + satellite_mass).to_kg();
-        let a = semimajor_axis.to_m();
-        Time::from_s(consts::TAU * f64::sqrt(a.powi(3) / (super::G * m)))
+    pub fn period(primary_mass: Mass, satellite_mass: Mass, semimajor_axis: Length) -> Time {
+        let tot_mass = primary_mass + satellite_mass;
+        consts::TAU * (semimajor_axis.powi(P3::new()) / (super::G * tot_mass)).sqrt()
     }
 
     pub fn mean_anomaly(period: Time, periapsis_time: Time, current_time: Time) -> Angle {
-        Angle::from_rot((current_time - periapsis_time) / period).reduce()
+        Angle::new::<revolution>(
+            ((current_time - periapsis_time) / period).get::<ratio>(),
+        ).fract::<revolution>()
     }
 
     // See http://www.stargazing.net/kepler/mean.html
     pub fn eccentric_anomaly(eccentricity: f64, mean_anomaly: Angle) -> Angle {
+        let tol = Angle::new::<radian>(super::TOL);
         let e = eccentricity;
-        let ma = mean_anomaly.to_rad();
-
+        let ma = mean_anomaly;
         let mut ea = ma;
-        let mut d = f64::INFINITY;
-        while d.abs() >= super::TOL {
-            d = ea - e * ea.sin() - ma;
-            ea -= d / (1. - e * ea.cos());
+        let mut d = Angle::new::<radian>(f64::INFINITY);
+        while d.abs() >= tol {
+            d = ea - Angle::new::<radian>(e * ea.sin().get::<ratio>()) - ma;
+            ea -= d / (1. - e * ea.cos().get::<ratio>());
         }
-
-        Angle::from_rad(ea).reduce()
+        ea.fract::<revolution>()
     }
 
     // See https://en.wikipedia.org/wiki/True_anomaly
     pub fn true_anomaly(eccentricity: f64, eccentric_anomaly: Angle) -> Angle {
         let e = eccentricity;
-        let ea = eccentric_anomaly.to_rad();
-        let b = e / (1. + f64::sqrt(1. - e.powi(2)));
-        Angle::from_rad(ea + 2. * f64::atan(b * ea.sin() / (1. - b * ea.cos()))).reduce()
+        let ea = eccentric_anomaly;
+        let b = e / (1. + (1. - e.powi(2)).sqrt());
+        (ea + 2. * (b * ea.sin() / (1. - b * ea.cos().get::<ratio>())).atan()).fract::<revolution>()
     }
 
     pub fn radial_distance(
-        semimajor_axis: Displacement,
+        semimajor_axis: Length,
         eccentricity: f64,
         eccentric_anomaly: Angle,
-    ) -> Displacement {
-        semimajor_axis * (1. - eccentricity * eccentric_anomaly.cos())
+    ) -> Length {
+        semimajor_axis * (1. - eccentricity * eccentric_anomaly.cos().get::<ratio>())
     }
 
     pub fn speed(
         primary_mass: Mass,
         satellite_mass: Mass,
-        semimajor_axis: Displacement,
-        radial_distance: Displacement,
+        semimajor_axis: Length,
+        radial_distance: Length,
     ) -> Velocity {
-        let m = (primary_mass + satellite_mass).to_kg();
-        let r = radial_distance.to_m();
-        let a = semimajor_axis.to_m();
-        Velocity::from_m_per_s(f64::sqrt(super::G * m * (2. / r - 1. / a)))
+        let m = primary_mass + satellite_mass;
+        (super::G * m * (2. / radial_distance - 1. / semimajor_axis)).sqrt()
     }
 
-    pub fn position(radial_distance: Displacement, true_anomaly: Angle) -> Vector2<f64> {
-        let r = radial_distance.to_m();
+    pub fn position(radial_distance: Length, true_anomaly: Angle) -> Vector2<f64> {
+        let r = radial_distance.get::<meter>();
         let nu = true_anomaly;
-        Vector2::new(r * nu.cos(), r * nu.sin())
+        Vector2::new(r * nu.cos().get::<ratio>(), r * nu.sin().get::<ratio>())
     }
 
     pub fn velocity(eccentricity: f64, speed: Velocity, position: &Vector2<f64>) -> Vector2<f64> {
         let v_dir =
             Vector2::new(-position[1], (1. - eccentricity.powi(2)) * position[0]).normalize();
-        v_dir.scale(speed.to_m_per_s())
+        v_dir.scale(speed.get::<meter_per_second>())
     }
 
     #[cfg(test)]
     mod tests {
+        use std::f64::consts;
+
+        use uom::si::angle::degree;
+        use uom::si::f64::{Angle, Mass, Time};
+        use uom::si::time::second;
+
         use super::*;
+        use crate::simulation;
         use crate::simulation::asserts::*;
         use crate::simulation::*;
-
-        use crate::measures::{Displacement, Mass};
-        use std::f64::consts;
 
         #[test]
         fn test_period() {
             let act_per = period(
-                Mass::from_kg(7. / G),
-                Mass::from_kg(1. / G),
-                Displacement::from_m(2.),
+                Mass::new::<kilogram>(7. / simulation::G.value),
+                Mass::new::<kilogram>(1. / simulation::G.value),
+                Length::new::<meter>(2.),
             );
-            assert_eq!(act_per / Time::from_s(1.), consts::TAU)
+            assert_eq!(
+                (act_per / Time::new::<second>(1.)).get::<ratio>(),
+                consts::TAU
+            )
         }
 
         #[test]
         fn test_mean_anomaly() {
-            let act_ma = mean_anomaly(Time::from_s(2.), Time::from_s(1.), Time::from_s(2.));
-            assert_abs_eq!(act_ma.to_rad(), consts::PI)
+            let act_ma = mean_anomaly(
+                Time::new::<second>(2.),
+                Time::new::<second>(1.),
+                Time::new::<second>(2.),
+            );
+            assert_abs_eq!(act_ma.get::<radian>(), consts::PI)
         }
 
         #[test]
         fn test_eccentric_anomaly_circle() {
             assert_eq!(
-                eccentric_anomaly(0., Angle::from_rad(consts::FRAC_PI_2)).to_rad(),
+                eccentric_anomaly(0., Angle::new::<radian>(consts::FRAC_PI_2)).get::<radian>(),
                 consts::FRAC_PI_2
             )
         }
@@ -182,15 +224,18 @@ mod kepler_orbit {
         #[test]
         fn test_eccentric_anomaly_mean_relation() {
             let e = 0.5;
-            let ma = Angle::from_rot(0.25);
+            let ma = Angle::new::<revolution>(0.25);
             let ea = eccentric_anomaly(e, ma);
-            assert_abs_eq!(ma.to_rad(), ea.to_rad() - e * ea.to_rad().sin())
+            assert_abs_eq!(
+                ma.get::<radian>(),
+                ea.get::<radian>() - e * ea.sin().get::<ratio>()
+            )
         }
 
         #[test]
         fn test_true_anomaly_circle() {
             assert_eq!(
-                true_anomaly(0., Angle::from_rad(consts::FRAC_PI_2)).to_rad(),
+                true_anomaly(0., Angle::new::<radian>(consts::FRAC_PI_2)).get::<radian>(),
                 consts::FRAC_PI_2
             )
         }
@@ -198,53 +243,52 @@ mod kepler_orbit {
         #[test]
         fn test_true_anomaly_eccentric_relation() {
             let e = 0.5;
-            let ea = Angle::from_rot(0.25);
+            let ea = Angle::new::<revolution>(0.25);
             let ta = true_anomaly(e, ea);
-            assert_abs_eq!(ta.cos(), (ea.cos() - e) / (1. - e * ea.cos()))
+            assert_abs_eq!(
+                ta.cos().get::<ratio>(),
+                (ea.cos().get::<ratio>() - e) / (1. - e * ea.cos().get::<ratio>())
+            )
         }
 
         #[test]
         fn test_radial_distance_extremes() {
-            assert_rel_eq!(
-                radial_distance(Displacement::from_m(2.), 0.5, Angle::from_rot(0.)).to_m(),
-                1.
-            );
-            assert_rel_eq!(
-                radial_distance(Displacement::from_m(2.), 0.5, Angle::from_rot(0.5)).to_m(),
-                3.
-            );
+            let d = radial_distance(Length::new::<meter>(2.), 0.5, Angle::new::<revolution>(0.));
+            assert_rel_eq!(d.get::<meter>(), 1.);
+            let d = radial_distance(Length::new::<meter>(2.), 0.5, Angle::new::<revolution>(0.5));
+            assert_rel_eq!(d.get::<meter>(), 3.);
         }
 
         #[test]
         fn test_radial_distance_true_anomaly_relation() {
-            let a = Displacement::from_m(10.);
+            let a = Length::new::<meter>(10.);
             let e = 0.5f64;
-            let ta = Angle::from_rot(0.25);
+            let ta = Angle::new::<revolution>(0.25);
             let exp_r = a * (1. - e.powi(2));
 
-            let ea = Angle::from_rad(f64::atan2(
-                f64::sqrt(1. - e.powi(2)) * ta.sin(),
-                e + ta.cos(),
+            let ea = Angle::new::<revolution>(f64::atan2(
+                f64::sqrt(1. - e.powi(2)) * ta.sin().get::<ratio>(),
+                e + ta.cos().get::<ratio>(),
             ));
             let act_r = radial_distance(a, e, ea);
-            assert_rel_eq!(act_r.to_m(), exp_r.to_m())
+            assert_rel_eq!(act_r.get::<meter>(), exp_r.get::<meter>())
         }
 
         #[test]
         fn test_speed() {
             let act_speed = speed(
-                Mass::from_kg(5. / G),
-                Mass::from_kg(1. / G),
-                Displacement::from_m(3.),
-                Displacement::from_m(2.),
+                Mass::new::<kilogram>(5. / simulation::G.value),
+                Mass::new::<kilogram>(1. / simulation::G.value),
+                Length::new::<meter>(3.),
+                Length::new::<meter>(2.),
             );
-            assert_rel_eq!(act_speed.to_m_per_s(), 2.)
+            assert_rel_eq!(act_speed.get::<meter_per_second>(), 2.)
         }
 
         #[test]
         fn test_position() {
             let exp_pos = Vector2::new(f64::sqrt(3.), 1.);
-            let act_pos = position(Displacement::from_m(2.), Angle::from_deg(30.));
+            let act_pos = position(Length::new::<meter>(2.), Angle::new::<degree>(30.));
             assert_rel_eq!(act_pos, exp_pos)
         }
     }
@@ -257,9 +301,10 @@ fn orbit_to_ecliptic(
     periapsis_argument: Angle,
     vector: &Vector3<f64>,
 ) -> Vector3<f64> {
-    let lon_rot = Rotation3::from_axis_angle(&Vector3::z_axis(), -ascending_node.to_rad());
-    let inc_rot = Rotation3::from_axis_angle(&Vector3::x_axis(), -inclination.to_rad());
-    let orb_rot = Rotation3::from_axis_angle(&Vector3::z_axis(), -periapsis_argument.to_rad());
+    let lon_rot = Rotation3::from_axis_angle(&Vector3::z_axis(), -ascending_node.get::<radian>());
+    let inc_rot = Rotation3::from_axis_angle(&Vector3::x_axis(), -inclination.get::<radian>());
+    let orb_rot =
+        Rotation3::from_axis_angle(&Vector3::z_axis(), -periapsis_argument.get::<radian>());
     (lon_rot * inc_rot * orb_rot).transform_vector(vector)
 }
 
@@ -280,10 +325,10 @@ pub enum Body {
 pub struct BodyProperties {
     luminosity: LuminousFlux,
     mass: Mass,
-    radius: Displacement,
+    radius: Length,
     primary: Option<Box<Self>>,
     eccentricity: f64,
-    semimajor_axis: Displacement,
+    semimajor_axis: Length,
     inclination: Angle,
     ascending_node: Angle,
     periapsis_argument: Angle,
@@ -296,14 +341,14 @@ impl Default for BodyProperties {
         Self {
             luminosity: LuminousFlux::default(),
             mass: Mass::default(),
-            radius: Displacement::default(),
+            radius: Length::default(),
             primary: Option::default(),
             eccentricity: f64::NAN,
-            semimajor_axis: Displacement::default(),
-            inclination: Angle::NAN,
-            ascending_node: Angle::NAN,
-            periapsis_argument: Angle::NAN,
-            periapsis_time: Time::NAN,
+            semimajor_axis: Length::default(),
+            inclination: Angle::new::<radian>(f64::NAN),
+            ascending_node: Angle::new::<radian>(f64::NAN),
+            periapsis_argument: Angle::new::<radian>(f64::NAN),
+            periapsis_time: Time::new::<second>(f64::NAN),
             epoch: Time::default(),
         }
     }
@@ -315,9 +360,10 @@ impl Default for BodyProperties {
 impl BodyProperties {
     fn sun(epoch: Time) -> Self {
         Self {
-            luminosity: LuminousFlux::from_lm(3.6E28),
-            mass: Mass::from_kg(1.988_5e30),
-            radius: Displacement::from_km(695_700.),
+            luminosity: LuminousIntensity::new::<candela>(3.6E28)
+                * SolidAngle::new::<steradian>(1.),
+            mass: Mass::new::<kilogram>(1.988_5e30),
+            radius: Length::new::<kilometer>(695_700.),
             epoch,
             ..Default::default()
         }
@@ -325,15 +371,15 @@ impl BodyProperties {
 
     fn earth(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(5.972_17e24),
-            radius: Displacement::from_km(6_371.0),
+            mass: Mass::new::<kilogram>(5.972_17e24),
+            radius: Length::new::<kilometer>(6_371.0),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.016_708_6,
-            semimajor_axis: Displacement::from_km(149_598_023.),
-            inclination: Angle::from_deg(0.000_05),
-            ascending_node: Angle::from_deg(-11.260_64),
-            periapsis_argument: Angle::from_deg(114.207_83),
-            periapsis_time: Time::from_day(2_459_947.368_234_879_337),
+            semimajor_axis: Length::new::<kilometer>(149_598_023.),
+            inclination: Angle::new::<degree>(0.000_05),
+            ascending_node: Angle::new::<degree>(-11.260_64).fract::<revolution>(),
+            periapsis_argument: Angle::new::<degree>(114.207_83),
+            periapsis_time: Time::new::<day>(2_459_947.368_234_879_337),
             epoch,
             ..Default::default()
         }
@@ -341,15 +387,15 @@ impl BodyProperties {
 
     fn moon(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(7.342e22),
-            radius: Displacement::from_km(1_737.4),
+            mass: Mass::new::<kilogram>(7.342e22),
+            radius: Length::new::<kilometer>(1_737.4),
             primary: Some(Box::new(BodyProperties::earth(epoch))),
             eccentricity: 0.054_9,
-            semimajor_axis: Displacement::from_km(384_399.),
-            inclination: Angle::from_deg(5.145),
-            ascending_node: Angle::from_deg(101.502_922_218_058_2),
-            periapsis_argument: Angle::from_deg(323.885_283_505_282_2).reduce(),
-            periapsis_time: Time::from_day(2_459_912.416_812_194_511),
+            semimajor_axis: Length::new::<kilometer>(384_399.),
+            inclination: Angle::new::<degree>(5.145),
+            ascending_node: Angle::new::<degree>(101.502_922_218_058_2),
+            periapsis_argument: Angle::new::<degree>(323.885_283_505_282_2),
+            periapsis_time: Time::new::<day>(2_459_912.416_812_194_511),
             epoch,
             ..Default::default()
         }
@@ -357,15 +403,15 @@ impl BodyProperties {
 
     fn jupiter(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(1.898_2e27),
-            radius: Displacement::from_km(69_911.),
+            mass: Mass::new::<kilogram>(1.898_2e27),
+            radius: Length::new::<kilometer>(69_911.),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.048_9,
-            semimajor_axis: Displacement::from_gm(778.479),
-            inclination: Angle::from_deg(1.303),
-            ascending_node: Angle::from_deg(100.464),
-            periapsis_argument: Angle::from_deg(273.867).reduce(),
-            periapsis_time: Time::from_day(2_459_751.897_397_325_840),
+            semimajor_axis: Length::new::<gigameter>(778.479),
+            inclination: Angle::new::<degree>(1.303),
+            ascending_node: Angle::new::<degree>(100.464),
+            periapsis_argument: Angle::new::<degree>(273.867),
+            periapsis_time: Time::new::<day>(2_459_751.897_397_325_840),
             epoch,
             ..Default::default()
         }
@@ -373,15 +419,15 @@ impl BodyProperties {
 
     fn mars(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(6.417_1e23),
-            radius: Displacement::from_km(3_389.5),
+            mass: Mass::new::<kilogram>(6.417_1e23),
+            radius: Length::new::<kilometer>(3_389.5),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.093_4,
-            semimajor_axis: Displacement::from_km(227_939_366.),
-            inclination: Angle::from_deg(1.850),
-            ascending_node: Angle::from_deg(49.578_54),
-            periapsis_argument: Angle::from_deg(286.5).reduce(),
-            periapsis_time: Time::from_day(2_459_751.897_397_325_840),
+            semimajor_axis: Length::new::<kilometer>(227_939_366.),
+            inclination: Angle::new::<degree>(1.850),
+            ascending_node: Angle::new::<degree>(49.578_54),
+            periapsis_argument: Angle::new::<degree>(286.5),
+            periapsis_time: Time::new::<day>(2_459_751.897_397_325_840),
             epoch,
             ..Default::default()
         }
@@ -389,15 +435,15 @@ impl BodyProperties {
 
     fn mercury(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(3.301_1e23),
-            radius: Displacement::from_km(2_439.7),
+            mass: Mass::new::<kilogram>(3.301_1e23),
+            radius: Length::new::<kilometer>(2_439.7),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.205_630,
-            semimajor_axis: Displacement::from_km(57_909_050.),
-            inclination: Angle::from_deg(7.005),
-            ascending_node: Angle::from_deg(48.331),
-            periapsis_argument: Angle::from_deg(29.124),
-            periapsis_time: Time::from_day(2_459_947.345_508_896_280),
+            semimajor_axis: Length::new::<kilometer>(57_909_050.),
+            inclination: Angle::new::<degree>(7.005),
+            ascending_node: Angle::new::<degree>(48.331),
+            periapsis_argument: Angle::new::<degree>(29.124),
+            periapsis_time: Time::new::<day>(2_459_947.345_508_896_280),
             epoch,
             ..Default::default()
         }
@@ -405,15 +451,15 @@ impl BodyProperties {
 
     fn neptune(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(1.024_13e26),
-            radius: Displacement::from_km(24_622.),
+            mass: Mass::new::<kilogram>(1.024_13e26),
+            radius: Length::new::<kilometer>(24_622.),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.008_678,
-            semimajor_axis: Displacement::from_km(4.50e9),
-            inclination: Angle::from_deg(1.770),
-            ascending_node: Angle::from_deg(131.783),
-            periapsis_argument: Angle::from_deg(273.187).reduce(),
-            periapsis_time: Time::from_day(2_464_955.570_929_014_124),
+            semimajor_axis: Length::new::<kilometer>(4.50e9),
+            inclination: Angle::new::<degree>(1.770),
+            ascending_node: Angle::new::<degree>(131.783),
+            periapsis_argument: Angle::new::<degree>(273.187),
+            periapsis_time: Time::new::<day>(2_464_955.570_929_014_124),
             epoch,
             ..Default::default()
         }
@@ -421,15 +467,15 @@ impl BodyProperties {
 
     fn saturn(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(5.683_4e26),
-            radius: Displacement::from_km(58_232.),
+            mass: Mass::new::<kilogram>(5.683_4e26),
+            radius: Length::new::<kilometer>(58_232.),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.056_5,
-            semimajor_axis: Displacement::from_km(1_433.53e6),
-            inclination: Angle::from_deg(2.485),
-            ascending_node: Angle::from_deg(113.665),
-            periapsis_argument: Angle::from_deg(339.392).reduce(),
-            periapsis_time: Time::from_day(2_459_751.897_397_325_840),
+            semimajor_axis: Length::new::<kilometer>(1_433.53e6),
+            inclination: Angle::new::<degree>(2.485),
+            ascending_node: Angle::new::<degree>(113.665),
+            periapsis_argument: Angle::new::<degree>(339.392),
+            periapsis_time: Time::new::<day>(2_459_751.897_397_325_840),
             epoch,
             ..Default::default()
         }
@@ -437,15 +483,15 @@ impl BodyProperties {
 
     fn uranus(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(8.681_0e25),
-            radius: Displacement::from_km(25_362.),
+            mass: Mass::new::<kilogram>(8.681_0e25),
+            radius: Length::new::<kilometer>(25_362.),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.047_17,
-            semimajor_axis: Displacement::from_gm(2_870.972),
-            inclination: Angle::from_deg(0.773),
-            ascending_node: Angle::from_deg(74.006),
-            periapsis_argument: Angle::from_deg(96.998_857),
-            periapsis_time: Time::from_day(2_469_819.223_219_580_948),
+            semimajor_axis: Length::new::<gigameter>(2_870.972),
+            inclination: Angle::new::<degree>(0.773),
+            ascending_node: Angle::new::<degree>(74.006),
+            periapsis_argument: Angle::new::<degree>(96.998_857),
+            periapsis_time: Time::new::<day>(2_469_819.223_219_580_948),
             epoch,
             ..Default::default()
         }
@@ -453,15 +499,15 @@ impl BodyProperties {
 
     fn venus(epoch: Time) -> Self {
         Self {
-            mass: Mass::from_kg(4.867_5e24),
-            radius: Displacement::from_km(6_051.8),
+            mass: Mass::new::<kilogram>(4.867_5e24),
+            radius: Length::new::<kilometer>(6_051.8),
             primary: Some(Box::new(BodyProperties::sun(epoch))),
             eccentricity: 0.006_772,
-            semimajor_axis: Displacement::from_km(108_208_000.),
-            inclination: Angle::from_deg(3.394_58),
-            ascending_node: Angle::from_deg(76.680),
-            periapsis_argument: Angle::from_deg(54.884),
-            periapsis_time: Time::from_day(2_460_051.982_227_367_815),
+            semimajor_axis: Length::new::<kilometer>(108_208_000.),
+            inclination: Angle::new::<degree>(3.394_58),
+            ascending_node: Angle::new::<degree>(76.680),
+            periapsis_argument: Angle::new::<degree>(54.884),
+            periapsis_time: Time::new::<day>(2_460_051.982_227_367_815),
             epoch,
             ..Default::default()
         }
@@ -486,20 +532,20 @@ impl BodyProperties {
         self.luminosity
     }
 
-    pub fn radius(&self) -> Displacement {
+    pub fn radius(&self) -> Length {
         self.radius
     }
 
-    pub fn apsis(&self) -> Displacement {
+    pub fn apsis(&self) -> Length {
         match &self.primary {
-            None => Displacement::from_m(0.),
+            None => Length::new::<meter>(0.),
             Some(_) => kepler_orbit::apsis(self.eccentricity, self.semimajor_axis),
         }
     }
 
     fn eccentric_anomaly(&self) -> Angle {
         match &self.primary {
-            None => Angle::NAN,
+            None => Angle::new::<radian>(f64::NAN),
             Some(primary) => {
                 let t = kepler_orbit::period(primary.mass, self.mass, self.semimajor_axis);
                 kepler_orbit::eccentric_anomaly(
@@ -524,14 +570,14 @@ impl BodyProperties {
 
     fn true_anomaly(&self) -> Angle {
         match &self.primary {
-            None => Angle::NAN,
+            None => Angle::new::<radian>(f64::NAN),
             Some(_) => kepler_orbit::true_anomaly(self.eccentricity, self.eccentric_anomaly()),
         }
     }
 
-    fn orbital_distance(&self) -> Displacement {
+    fn orbital_distance(&self) -> Length {
         match &self.primary {
-            None => Displacement::from_m(0.),
+            None => Length::new::<meter>(0.),
             Some(_) => kepler_orbit::radial_distance(
                 self.semimajor_axis,
                 self.eccentricity,
@@ -623,7 +669,7 @@ impl OrbitalState {
     }
 
     fn apply_force(&mut self, force: &Vector3<f64>, dt: f64) {
-        self.velocity += force * dt / self.mass.to_kg();
+        self.velocity += force * dt / self.mass.get::<kilogram>();
         self.position += self.velocity * dt;
     }
 }
@@ -683,9 +729,9 @@ impl SolarSystem {
 
         for i in 0..self.body_states.len() {
             for j in (i + 1)..self.body_states.len() {
-                let gmm = G * self.body_states[i].mass.to_kg() * self.body_states[j].mass.to_kg();
+                let gmm = G * self.body_states[i].mass * self.body_states[j].mass;
                 let r = self.body_states[i].position - self.body_states[j].position;
-                let force = -gmm / f64::powi(r.magnitude(), 3) * r;
+                let force = -gmm.value / f64::powi(r.magnitude(), 3) * r;
 
                 net_forces[i] += force;
                 net_forces[j] -= force;
@@ -733,22 +779,22 @@ impl Debug for SolarSystem {
 
 #[cfg(test)]
 mod tests {
+    use uom::si::angle::revolution;
+
     use super::asserts::*;
     use super::*;
 
-    use crate::measures::Time;
-
     fn epoch() -> Time {
-        Time::from_day(2_459_945.5)
+        Time::new::<day>(2_459_945.5)
     }
 
     #[test]
     fn test_orbit_to_ecliptic_periapsis_argument() {
         let orbit = Vector3::new(1f64, 0., 0.);
         let act = orbit_to_ecliptic(
-            Angle::from_rot(0.),
-            Angle::from_rot(0.),
-            Angle::from_rot(0.25),
+            Angle::new::<revolution>(0.),
+            Angle::new::<revolution>(0.),
+            Angle::new::<revolution>(0.25),
             &orbit,
         );
         assert_rel_eq!(act, Vector3::new(0f64, -1., 0.))
@@ -758,9 +804,9 @@ mod tests {
     fn test_orbit_to_ecliptic_inclination() {
         let orbit = Vector3::new(0f64, -1., 0.);
         let act = orbit_to_ecliptic(
-            Angle::from_rot(0.5),
-            Angle::from_rot(0.),
-            Angle::from_rot(0.),
+            Angle::new::<revolution>(0.5),
+            Angle::new::<revolution>(0.),
+            Angle::new::<revolution>(0.),
             &orbit,
         );
         assert_rel_eq!(act, Vector3::new(0f64, 1., 0.))
@@ -770,9 +816,9 @@ mod tests {
     fn test_orbit_to_ecliptic_ascending_node() {
         let orbit = Vector3::new(0f64, 1., 0.);
         let act = orbit_to_ecliptic(
-            Angle::from_rot(0.),
-            Angle::from_rot(0.25),
-            Angle::from_rot(0.),
+            Angle::new::<revolution>(0.),
+            Angle::new::<revolution>(0.25),
+            Angle::new::<revolution>(0.),
             &orbit,
         );
         assert_rel_eq!(act, Vector3::new(1f64, 0., 0.))
@@ -782,9 +828,9 @@ mod tests {
     fn test_orbit_to_ecliptic_combined() {
         let orbit = Vector3::new(1f64, 0., 0.);
         let act = orbit_to_ecliptic(
-            Angle::from_rot(0.5),
-            Angle::from_rot(0.25),
-            Angle::from_rot(0.25),
+            Angle::new::<revolution>(0.5),
+            Angle::new::<revolution>(0.25),
+            Angle::new::<revolution>(0.25),
             &orbit,
         );
         assert_rel_eq!(act, orbit)
@@ -793,27 +839,27 @@ mod tests {
     #[test]
     fn test_body_properties_eccentric_anomaly_sun() {
         let sun = BodyProperties::sun(epoch());
-        assert!(sun.eccentric_anomaly().to_rad().is_nan())
+        assert!(sun.eccentric_anomaly().is_nan())
     }
 
     #[test]
     fn test_body_properties_eccentric_anomaly_not_sun() {
         let ss = BodyProperties::solar_system_bodies(epoch());
         let earth = ss.get(&Body::Earth).unwrap();
-        assert!(!earth.eccentric_anomaly().to_rad().is_nan())
+        assert!(!earth.eccentric_anomaly().is_nan())
     }
 
     #[test]
     fn test_body_properties_orbital_distance_sun() {
         let sun = BodyProperties::sun(epoch());
-        assert_eq!(sun.orbital_distance().to_m(), 0.)
+        assert_eq!(sun.orbital_distance().get::<meter>(), 0.)
     }
 
     #[test]
     fn test_body_properties_orbital_distance_not_sun() {
         let ss = BodyProperties::solar_system_bodies(epoch());
         let earth = ss.get(&Body::Earth).unwrap();
-        assert_ne!(earth.orbital_distance().to_m(), 0.)
+        assert_ne!(earth.orbital_distance().get::<meter>(), 0.)
     }
 
     #[test]

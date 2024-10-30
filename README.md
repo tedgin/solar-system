@@ -31,6 +31,7 @@ trunk build --release --features wasm
 
 ## Future work
 
+1. Replace measures library with a more mature library from crates.io.
 1. Once Firefox stable is updated to version 132, redo Web Assembly version.
 1. Document the code.
 1. Finish creating unit tests.
@@ -41,4 +42,3 @@ trunk build --release --features wasm
 1. Improve integration calculation of velocity and position when acceleration is changing rapidly.
 1. Allow addition of celestial bodies through the UI.
 1. Extend to support starting times other than 2023/01/01.
-1. Replace measures library with a more mature library from crates.io.
