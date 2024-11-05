@@ -1,0 +1,4 @@
+[build]
+filehash = false
+frozen = true
+minify = "on_release"

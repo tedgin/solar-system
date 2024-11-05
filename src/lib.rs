@@ -5,7 +5,7 @@ use bevy::{
     ecs::component::{ComponentHooks, StorageType},
     prelude::*,
     utils::HashMap,
-    window::{PrimaryWindow, WindowMode},
+    window::PrimaryWindow,
 };
 
 extern crate bevy_mod_billboard;
@@ -313,7 +313,10 @@ fn create_avatars(
     }
 }
 
-fn update_avatars(bodies: Query<&BodyModel, With<Body>>, mut transforms: Query<&mut Transform>) {
+fn update_avatars(
+    bodies: Query<&BodyModel, With<Body>>,
+    mut transforms: Query<&mut Transform>,
+) {
     for model in &bodies {
         let avatar = model.avatar().unwrap();
         *transforms.get_mut(avatar).unwrap() = Transform::from_translation(*model.position());
@@ -326,9 +329,20 @@ fn mk_lbl_transform(
     cam: &Camera,
     cam_trans: &GlobalTransform,
 ) -> Transform {
-    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position()).unwrap();
-    let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
-    let lbl_pos = cam.ndc_to_world(cam_trans, lbl_ndc).unwrap();
+    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position());
+
+    // The avatar position in NDC can be infinite, causing a failure to
+    // determine the label's position in world coordinates. Since this
+    // will only happen when the avatar is off camera, set the label's
+    // position to be the avatar's position.
+    let lbl_pos = match avatar_ndc {
+        None => *model.position(),
+        Some(avatar_ndc) => {
+            let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
+            cam.ndc_to_world(cam_trans, lbl_ndc).unwrap()
+        },
+    };
+
     let lbl_scale = LABEL_SCALE * model.position().distance(sim.position_of(Body::Earth));
     Transform::from_translation(lbl_pos).with_scale(Vec3::splat(lbl_scale))
 }
@@ -402,50 +416,32 @@ fn update_camera(sim: Res<Simulation>, mut cam: Query<&mut Transform, With<Camer
     *cam.single_mut() = mk_cam_transform(&sim);
 }
 
-fn quit(input: Res<ButtonInput<KeyCode>>, mut app_exit_events: ResMut<Events<AppExit>>) {
-    if input.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
-        && input.just_released(KeyCode::KeyC)
-    {
-        app_exit_events.send(AppExit::Success);
-    }
-}
 
-/// Run the simulation.
-pub fn run() {
-    let win_plug = WindowPlugin {
-        primary_window: Some(Window {
-            mode: WindowMode::BorderlessFullscreen,
-            ..default()
-        }),
-        ..default()
-    };
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(win_plug),
-            BillboardPlugin,
-            FramepacePlugin,
-        ))
-        .insert_resource(Simulation::init())
-        .insert_resource(ClearColor(Color::BLACK))
-        .add_systems(
-            Startup,
+pub fn setup(app: &mut App) -> &mut App {
+    app.add_plugins((
+        BillboardPlugin,
+        FramepacePlugin,
+    ))
+    .insert_resource(Simulation::init())
+    .insert_resource(ClearColor(Color::BLACK))
+    .add_systems(
+        Startup,
+        (
             (
-                (create_body_models, create_camera),
-                (create_avatars, create_labels),
-            )
-                .chain(),
-        )
-        .add_systems(
-            FixedUpdate,
-            (
-                quit,
-                (
-                    advance_sim_time,
-                    (update_bodies, update_camera),
-                    (update_avatars, update_labels),
-                )
-                    .chain(),
+                create_body_models,
+                create_camera,
             ),
+            (create_avatars, create_labels),
         )
-        .run();
+            .chain(),
+    )
+    .add_systems(
+        FixedUpdate,
+        (
+            advance_sim_time,
+            (update_bodies, update_camera),
+            (update_avatars, update_labels),
+        )
+            .chain(),
+    )
 }

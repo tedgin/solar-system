@@ -120,9 +120,8 @@ mod kepler_orbit {
     }
 
     pub fn mean_anomaly(period: Time, periapsis_time: Time, current_time: Time) -> Angle {
-        Angle::new::<revolution>(
-            ((current_time - periapsis_time) / period).get::<ratio>(),
-        ).fract::<revolution>()
+        Angle::new::<revolution>(((current_time - periapsis_time) / period).get::<ratio>())
+            .fract::<revolution>()
     }
 
     // See http://www.stargazing.net/kepler/mean.html

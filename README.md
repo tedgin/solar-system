@@ -10,9 +10,6 @@ This simulation isn't real-time. It's not even accurate. It's an $N$-body gravit
 
 ## Desktop and Web Browser
 
-> [!NOTE]
-> The Web Assembly version hasn't been tested after switching to bevy.
-
 This application can be run on the desktop or in a web browser.
 
 ## Building It
@@ -26,16 +23,13 @@ cargo build --release
 The Web Assembly version can be built using [Trunk](https://trunkrs.dev/).
 
 ```console
-trunk build --release --features wasm
+trunk build --release
 ```console
 
 ## Future work
 
-1. Replace measures library with a more mature library from crates.io.
-1. Once Firefox stable is updated to version 132, redo Web Assembly version.
 1. Document the code.
 1. Finish creating unit tests.
-1. Fix bug in kiss3d that prevents text from being rendered in the correction location. This will be resolved if [kiss3d PR #319](https://github.com/sebcrozet/kiss3d/pull/319) is merged.
 1. Fix time keeping in WebAssembly version.
 1. Fix label size issue in WebAssembly version.
 1. Allow camera position and orientation to be changed through the UI.
