@@ -10,7 +10,7 @@ use nalgebra::{Rotation3, Vector3};
 
 use uom::{
     si::{
-        angle::{degree, radian, revolution},
+        angle::{degree, radian},
         f64::{Angle, Length, LuminousIntensity, Mass, SolidAngle, Time},
         length::{gigameter, kilometer, meter},
         luminous_intensity::candela,
@@ -21,6 +21,12 @@ use uom::{
     },
     typenum::{N1, N2, P1, P3, Z0},
 };
+
+// TODO: Once https://github.com/iliekturtles/uom/pull/494 has been merged and released, switch to
+// using Angle::rem_euclid()
+fn rem_euclid(angle: Angle, modulus: Angle) -> Angle {
+    Angle::new::<radian>(angle.value.rem_euclid(modulus.value))
+}
 
 // TODO: propose this as a new derived quantity to uom
 pub type LuminousFlux = Quantity<ISQ<Z0, Z0, Z0, Z0, Z0, Z0, P1>, SI<f64>, f64>;
@@ -94,6 +100,7 @@ mod asserts {
     pub use crate::assert_rel_eq;
 }
 
+
 mod kepler_orbit {
     use core::f64;
     use std::f64::consts;
@@ -120,8 +127,10 @@ mod kepler_orbit {
     }
 
     pub fn mean_anomaly(period: Time, periapsis_time: Time, current_time: Time) -> Angle {
-        Angle::new::<revolution>(((current_time - periapsis_time) / period).get::<ratio>())
-            .fract::<revolution>()
+        super::rem_euclid(
+            Angle::new::<revolution>(((current_time - periapsis_time) / period).get::<ratio>()),
+            Angle::FULL_TURN,
+        )
     }
 
     // See http://www.stargazing.net/kepler/mean.html
@@ -135,7 +144,7 @@ mod kepler_orbit {
             d = ea - Angle::new::<radian>(e * ea.sin().get::<ratio>()) - ma;
             ea -= d / (1. - e * ea.cos().get::<ratio>());
         }
-        ea.fract::<revolution>()
+        super::rem_euclid(ea, Angle::FULL_TURN)
     }
 
     // See https://en.wikipedia.org/wiki/True_anomaly
@@ -143,7 +152,10 @@ mod kepler_orbit {
         let e = eccentricity;
         let ea = eccentric_anomaly;
         let b = e / (1. + (1. - e.powi(2)).sqrt());
-        (ea + 2. * (b * ea.sin() / (1. - b * ea.cos().get::<ratio>())).atan()).fract::<revolution>()
+        super::rem_euclid(
+            ea + 2. * (b * ea.sin() / (1. - b * ea.cos().get::<ratio>())).atan(),
+            Angle::FULL_TURN,
+        )
     }
 
     pub fn radial_distance(
@@ -376,7 +388,7 @@ impl BodyProperties {
             eccentricity: 0.016_708_6,
             semimajor_axis: Length::new::<kilometer>(149_598_023.),
             inclination: Angle::new::<degree>(0.000_05),
-            ascending_node: Angle::new::<degree>(-11.260_64).fract::<revolution>(),
+            ascending_node: rem_euclid(Angle::new::<degree>(-11.260_64), Angle::FULL_TURN),
             periapsis_argument: Angle::new::<degree>(114.207_83),
             periapsis_time: Time::new::<day>(2_459_947.368_234_879_337),
             epoch,
