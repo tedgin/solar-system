@@ -329,19 +329,14 @@ fn mk_lbl_transform(
     cam: &Camera,
     cam_trans: &GlobalTransform,
 ) -> Transform {
-    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position());
+    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position()).unwrap();
 
     // The avatar position in NDC can be infinite, causing a failure to
     // determine the label's position in world coordinates. Since this
     // will only happen when the avatar is off camera, set the label's
     // position to be the avatar's position.
-    let lbl_pos = match avatar_ndc {
-        None => *model.position(),
-        Some(avatar_ndc) => {
-            let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
-            cam.ndc_to_world(cam_trans, lbl_ndc).unwrap()
-        },
-    };
+    let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
+    let lbl_pos = cam.ndc_to_world(cam_trans, lbl_ndc).unwrap_or(*model.position());
 
     let lbl_scale = LABEL_SCALE * model.position().distance(sim.position_of(Body::Earth));
     Transform::from_translation(lbl_pos).with_scale(Vec3::splat(lbl_scale))
