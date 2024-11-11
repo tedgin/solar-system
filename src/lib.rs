@@ -131,43 +131,64 @@ impl Simulation {
     }
 
     pub fn apsis_of(&self, body: Body) -> f32 {
-        self.solar_system
-            .properties_of(body)
-            .apsis()
-            .get::<astronomical_unit>() as f32
+        // TODO: Try to eliminate Err
+        match self.solar_system.properties_of(body) {
+            Ok(props) => props.apsis().get::<astronomical_unit>() as f32,
+            Err(_) => 0.,
+        }
     }
 
-    pub fn color_of(&self, body: Body) -> &Color {
-        self.body_visuals.get(&body).unwrap().color()
+    pub fn color_of(&self, body: Body) -> &Color{
+        // TODO: Try to eliminate Err
+        match self.body_visuals.get(&body) {
+            Some(vis) => vis.color(),
+            None => &Color::WHITE,
+        }
     }
 
     pub fn luminosity_of(&self, body: Body) -> f32 {
-        self.solar_system.properties_of(body).luminosity().value as f32
+        // TODO: Try to eliminate Err
+        match self.solar_system.properties_of(body) {
+            Ok(props) =>  props.luminosity().value as f32,
+            Err(_) => 0.,
+        }
     }
 
-    pub fn name_of(&self, body: Body) -> &String {
-        self.body_visuals.get(&body).unwrap().name()
+    pub fn name_of(&self, body: Body) -> String {
+        // TODO: Try to eliminate Err
+        match self.body_visuals.get(&body) {
+            Some(vis) => vis.name().clone(),
+            None => String::from("unknown"),
+        }
     }
 
     pub fn position_of(&self, body: Body) -> Vec3 {
-        let pos = self.solar_system.position_of(body);
-        Vec3::new(
-            f64::Length::new::<meter>(pos.x).get::<astronomical_unit>() as f32,
-            f64::Length::new::<meter>(pos.y).get::<astronomical_unit>() as f32,
-            f64::Length::new::<meter>(pos.z).get::<astronomical_unit>() as f32,
-        )
+        // TODO: Try to eliminate Err
+        match self.solar_system.position_of(body) {
+            Ok(pos) => Vec3::new(
+                f64::Length::new::<meter>(pos.x).get::<astronomical_unit>() as f32,
+                f64::Length::new::<meter>(pos.y).get::<astronomical_unit>() as f32,
+                f64::Length::new::<meter>(pos.z).get::<astronomical_unit>() as f32,
+            ),
+            Err(_) => Vec3::ZERO,
+        }
     }
 
     pub fn radius_of(&self, body: Body) -> f32 {
-        self.solar_system
-            .properties_of(body)
-            .radius()
-            .get::<astronomical_unit>() as f32
+        match self.solar_system.properties_of(body) {
+            Ok(props) => props.radius().get::<astronomical_unit>() as f32,
+            Err(_) => 0.,
+        }
     }
 
     pub fn velocity_of(&self, body: Body) -> Vec3 {
-        let world_vel = (self.solar_system.velocity_of(body) * MPS_TO_AUPD).cast::<f32>();
-        Vec3::new(world_vel.x, world_vel.y, world_vel.z)
+        match self.solar_system.velocity_of(body) {
+            Ok(vel) => {
+                let world_vel = (vel * MPS_TO_AUPD).cast::<f32>();
+                Vec3::new(world_vel.x, world_vel.y, world_vel.z)
+            },
+            Err(_) => Vec3::ZERO,
+        }
     }
 }
 
@@ -191,9 +212,9 @@ struct BodyModel {
 }
 
 impl BodyModel {
-    pub fn new(body: Body, sim: &Simulation) -> Self {
+    pub fn new(pos: &Vec3) -> Self {
         Self {
-            position: sim.position_of(body),
+            position: *pos,
             ..default()
         }
     }
@@ -236,7 +257,7 @@ fn create_body_models(sim: Res<Simulation>, mut commands: Commands) {
         Body::Uranus,
         Body::Neptune,
     ] {
-        commands.spawn((body, BodyModel::new(body, &sim)));
+        commands.spawn((body, BodyModel::new(&sim.position_of(body))));
     }
 }
 
@@ -267,11 +288,13 @@ fn create_avatars(
 ) {
     let min_ang = min_ang_res(window.single());
 
+    // Camera is on Earth
+    let earth_apsis = sim.apsis_of(Body::Earth);
+
     for (body, mut model) in &mut bodies {
-        // Camera is on Earth
         let max_dist = match body {
             Body::Moon => sim.apsis_of(*body),
-            _ => sim.apsis_of(*body) + sim.apsis_of(Body::Earth),
+            _ => sim.apsis_of(*body) + earth_apsis,
         };
 
         let min_radius = max_dist * min_ang.tan() / 2.;
@@ -318,8 +341,12 @@ fn update_avatars(
     mut transforms: Query<&mut Transform>,
 ) {
     for model in &bodies {
-        let avatar = model.avatar().unwrap();
-        *transforms.get_mut(avatar).unwrap() = Transform::from_translation(*model.position());
+        if let Some(avatar) = model.avatar() {
+            // TODO: Handle query entity error
+            if let Ok(mut transform) = transforms.get_mut(avatar) {
+                *transform = Transform::from_translation(*model.position());
+            }
+        }
     }
 }
 
@@ -329,14 +356,19 @@ fn mk_lbl_transform(
     cam: &Camera,
     cam_trans: &GlobalTransform,
 ) -> Transform {
-    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position()).unwrap();
+    let avatar_ndc = cam.world_to_ndc(cam_trans, *model.position());
 
-    // The avatar position in NDC can be infinite, causing a failure to
-    // determine the label's position in world coordinates. Since this
-    // will only happen when the avatar is off camera, set the label's
-    // position to be the avatar's position.
-    let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
-    let lbl_pos = cam.ndc_to_world(cam_trans, lbl_ndc).unwrap_or(*model.position());
+    let lbl_pos = match avatar_ndc {
+        None => *model.position(),
+        Some(avatar_ndc) => {
+            // The avatar position in NDC can be infinite, causing a failure to
+            // determine the label's position in world coordinates. Since this
+            // will only happen when the avatar is off camera, set the label's
+            // position to be the avatar's position.
+            let lbl_ndc = avatar_ndc + Vec3::new(0., -LABEL_OFFSET, 0.);
+            cam.ndc_to_world(cam_trans, lbl_ndc).unwrap_or_else(|| *model.position())
+        },
+    };
 
     let lbl_scale = LABEL_SCALE * model.position().distance(sim.position_of(Body::Earth));
     Transform::from_translation(lbl_pos).with_scale(Vec3::splat(lbl_scale))
@@ -349,6 +381,7 @@ fn create_labels(
     cam: Query<(&Camera, &GlobalTransform)>,
 ) {
     let (cam, cam_trans) = cam.single();
+
     for (body, mut model) in &mut bodies {
         let lbl = commands.spawn(BillboardTextBundle {
             text: Text::from_section(
@@ -373,8 +406,11 @@ fn update_labels(
 ) {
     let (cam, cam_trans) = cam.single();
     for model in &bodies {
-        *transforms.get_mut(model.label().unwrap()).unwrap() =
-            mk_lbl_transform(&sim, model, cam, cam_trans);
+        if let Some(label) = model.label() {
+            if let Ok(mut transform) = transforms.get_mut(label) {
+                *transform  = mk_lbl_transform(&sim, model, cam, cam_trans);
+            }
+        }
     }
 }
 

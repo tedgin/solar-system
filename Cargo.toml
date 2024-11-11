@@ -9,9 +9,7 @@ lto = true
 codegen-units = 1
 
 [dependencies]
-bevy = { version = "0.14", default-features = false, features = [
-	"bevy_pbr", "default_font", "multi_threaded", "tonemapping_luts", "wayland", "webgl2",
-] }
+bevy = "0.14"
 bevy_framepace = "0.17"
 bevy_mod_billboard = "0.7"
 nalgebra = "0.33"

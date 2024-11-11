@@ -2,8 +2,9 @@ use core::f64;
 use std::{
     cmp::Eq,
     collections::HashMap,
-    fmt::{Debug, Formatter, Result},
+    fmt::{self, Debug, Formatter},
     marker::PhantomData,
+    result::Result,
 };
 
 use nalgebra::{Rotation3, Vector3};
@@ -28,7 +29,8 @@ fn rem_euclid(angle: Angle, modulus: Angle) -> Angle {
     Angle::new::<radian>(angle.value.rem_euclid(modulus.value))
 }
 
-// TODO: propose this as a new derived quantity to uom
+// TODO: Switch to uom's LuminousFlux once https://github.com/iliekturtles/uom/pull/313 has been
+// merged and released.
 pub type LuminousFlux = Quantity<ISQ<Z0, Z0, Z0, Z0, Z0, Z0, P1>, SI<f64>, f64>;
 
 const G: Quantity<ISQ<P3, N1, N2, Z0, Z0, Z0, Z0>, SI<f64>, f64> = Quantity {
@@ -686,9 +688,13 @@ impl OrbitalState {
 }
 
 impl Debug for OrbitalState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}\t{:?}", self.position, self.velocity)
     }
+}
+
+fn unknown_body(body: Body) -> String {
+    format!("{:?} is not a known celestial body.", body)
 }
 
 pub struct SolarSystem {
@@ -754,32 +760,35 @@ impl SolarSystem {
         }
     }
 
-    pub fn position_of(&self, body: Body) -> &Vector3<f64> {
+    pub fn position_of(&self, body: Body) -> Result<&Vector3<f64>, String> {
         for state in self.body_states.iter() {
             if state.body == body {
-                return state.position();
+                return Ok(state.position());
             }
         }
-        panic!("unknown celestial body");
+        return Err(unknown_body(body));
     }
 
-    pub fn velocity_of(&self, body: Body) -> &Vector3<f64> {
+    pub fn velocity_of(&self, body: Body) -> Result<&Vector3<f64>, String> {
         for state in self.body_states.iter() {
             if state.body == body {
-                return state.velocity();
+                return Ok(state.velocity());
             }
         }
-        panic!("unknown celestial body");
+        return Err(unknown_body(body));
     }
 
     // Return the properties for a requested body
-    pub fn properties_of(&self, body: Body) -> &BodyProperties {
-        self.body_properties.get(&body).unwrap()
+    pub fn properties_of(&self, body: Body) -> Result<&BodyProperties, String> {
+        match self.body_properties.get(&body) {
+            Some(prop) => Ok(prop),
+            None => Err(unknown_body(body)),
+        }
     }
 }
 
 impl Debug for SolarSystem {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}:\n", self.time)?;
         for i in 0..self.bodies.len() {
             write!(f, "\t{:?}\t{:?}\n", self.bodies[i], self.body_states[i])?;
