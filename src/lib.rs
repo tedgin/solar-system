@@ -185,6 +185,7 @@ impl Simulation {
     }
 }
 
+
 // This function advance the time by one step in the solar system model.
 fn advance_sim_time(mut sim: ResMut<Simulation>) {
     sim.advance();
@@ -194,6 +195,35 @@ impl Component for Body {
     const STORAGE_TYPE: StorageType = StorageType::Table;
 
     fn register_component_hooks(_hooks: &mut ComponentHooks) {}
+}
+
+#[derive(Component)]
+struct Observer {
+    position: Vec3,
+    facing: Dir3,
+    up: Dir3,
+}
+
+impl Observer {
+    pub fn new() -> Self {
+        Self {
+            position: Vec3::new(0., 0., 80.),
+            facing: Dir3::NEG_Z,
+            up: Dir3::Y,
+        }
+    }
+
+    pub fn position(&self) -> &Vec3 {
+        &self.position
+    }
+
+    pub fn mk_transform(&self) -> Transform {
+        Transform::from_translation(self.position).looking_to(self.facing, self.up)
+    }
+}
+
+fn create_observer(mut commands: Commands) {
+    commands.spawn(Observer::new());
 }
 
 // This is the view model of a celestial body.
@@ -240,10 +270,7 @@ impl BodyModel {
 // This adds the celestial bodies being watched to the bevy World.
 fn create_body_models(sim: Res<Simulation>, mut commands: Commands) {
     for body in sim.bodies() {
-        match body {
-            Body::Earth => (),
-            _ => { commands.spawn((body, BodyModel::new(&sim.position_of(body)))); }
-        }
+         commands.spawn((body, BodyModel::new(&sim.position_of(body))));
     }
 }
 
@@ -270,18 +297,18 @@ fn create_avatars(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     window: Query<&Window, With<PrimaryWindow>>,
+    observer: Query<&Observer>,
     mut bodies: Query<(&Body, &mut BodyModel)>,
 ) {
     let min_ang = min_ang_res(window.single());
-
-    // Camera is on Earth
-    let earth_apsis = sim.apsis_of(Body::Earth);
+    let cam_dist = observer.single().position().length();
 
     for (body, mut model) in &mut bodies {
-        let max_dist = match body {
-            Body::Moon => sim.apsis_of(*body),
-            _ => sim.apsis_of(*body) + earth_apsis,
+        let max_sun_dist = match body {
+            Body::Moon => sim.apsis_of(*body) + sim.apsis_of(Body::Earth),
+            _ => sim.apsis_of(*body)
         };
+        let max_dist = (max_sun_dist.powi(2) + cam_dist.powi(2)).sqrt();
 
         let min_radius = max_dist * min_ang.tan() / 2.;
         let avatar_radius = sim.radius_of(*body).max(min_radius);
@@ -336,8 +363,8 @@ fn update_avatars(
 }
 
 fn mk_lbl_transform(
-    sim: &Simulation,
     model: &BodyModel,
+    observer: &Observer,
     cam: &Camera,
     cam_trans: &GlobalTransform,
 ) -> Transform {
@@ -355,7 +382,7 @@ fn mk_lbl_transform(
         },
     };
 
-    let lbl_scale = LABEL_SCALE * model.position().distance(sim.position_of(Body::Earth));
+    let lbl_scale = LABEL_SCALE * model.position().distance(*observer.position());
     Transform::from_translation(lbl_pos).with_scale(Vec3::splat(lbl_scale))
 }
 
@@ -363,29 +390,35 @@ fn create_labels(
     sim: Res<Simulation>,
     mut commands: Commands,
     mut bodies: Query<(&Body, &mut BodyModel)>,
+    observer: Query<&Observer>,
     cam: Query<(&Camera, &GlobalTransform)>,
 ) {
     let (cam, cam_trans) = cam.single();
 
     for (body, mut model) in &mut bodies {
-        let lbl = commands.spawn(BillboardTextBundle {
-            text: Text::from_section(
-                sim.name_of(*body),
-                TextStyle {
-                    color: sim.color_of(*body).with_luminance(1.),
+        match body {
+            Body::Moon => (),
+            _ => {
+                let lbl = commands.spawn(BillboardTextBundle {
+                    text: Text::from_section(
+                        sim.name_of(*body),
+                        TextStyle {
+                            color: sim.color_of(*body).with_luminance(1.),
+                            ..default()
+                        },
+                    ),
+                    transform: mk_lbl_transform(&model, observer.single(), cam, cam_trans),
                     ..default()
-                },
-            ),
-            transform: mk_lbl_transform(&sim, &model, cam, cam_trans),
-            ..default()
-        });
-        model.set_label(lbl.id());
+                });
+                model.set_label(lbl.id());
+            }
+        }
     }
 }
 
 fn update_labels(
-    sim: Res<Simulation>,
     bodies: Query<&BodyModel, With<Body>>,
+    observer: Query<&Observer>,
     cam: Query<(&Camera, &GlobalTransform)>,
     mut transforms: Query<&mut Transform>,
 ) {
@@ -393,22 +426,13 @@ fn update_labels(
     for model in &bodies {
         if let Some(label) = model.label() {
             if let Ok(mut transform) = transforms.get_mut(label) {
-                *transform  = mk_lbl_transform(&sim, model, cam, cam_trans);
+                *transform  = mk_lbl_transform(model, observer.single(), cam, cam_trans);
             }
         }
     }
 }
 
-fn mk_cam_transform(sim: &Simulation) -> Transform {
-    let cam_pos = sim.position_of(Body::Earth);
-    let focus_pos = sim.position_of(Body::Sun);
-    let z = focus_pos - cam_pos;
-    let x = -sim.velocity_of(Body::Earth);
-    let y = z.cross(x);
-    Transform::from_translation(cam_pos).looking_at(focus_pos, y)
-}
-
-fn create_camera(sim: Res<Simulation>, mut commands: Commands) {
+fn create_camera(mut commands: Commands, observer: Query<&Observer>) {
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
@@ -421,15 +445,15 @@ fn create_camera(sim: Res<Simulation>, mut commands: Commands) {
                 ..default()
             }),
             tonemapping: Tonemapping::TonyMcMapface,
-            transform: mk_cam_transform(&sim),
+            transform: observer.single().mk_transform(),
             ..default()
         },
         BloomSettings::NATURAL,
     ));
 }
 
-fn update_camera(sim: Res<Simulation>, mut cam: Query<&mut Transform, With<Camera>>) {
-    *cam.single_mut() = mk_cam_transform(&sim);
+fn update_camera(mut cam: Query<&mut Transform, With<Camera>>, observer: Query<&Observer>) {
+    *cam.single_mut() = observer.single().mk_transform();
 }
 
 
@@ -443,6 +467,7 @@ pub fn setup(app: &mut App) -> &mut App {
     .add_systems(
         Startup,
         (
+            create_observer,
             (
                 create_body_models,
                 create_camera,
