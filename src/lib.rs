@@ -1,5 +1,7 @@
 extern crate bevy;
 
+use std::collections::HashSet;
+
 use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     ecs::component::{ComponentHooks, StorageType},
@@ -14,20 +16,27 @@ use bevy_mod_billboard::prelude::*;
 extern crate bevy_framepace;
 use bevy_framepace::FramepacePlugin;
 
-extern crate uom;
-use uom::si::{
-    angle::radian,
-    f32::{Angle, Length},
-    f64,
-    length::{astronomical_unit, inch, meter},
-    time::day,
+extern crate strum;
+
+mod uom_wrapper;
+use uom_wrapper::{
+    MPS_TO_AUPD,
+    si::{
+        angle::radian,
+        f32::{Angle, Length},
+        f64::{self, Time},
+        length::{astronomical_unit, inch, meter},
+        time::{day, minute},
+    },
 };
+
+mod kepler_orbit;
 
 mod simulation;
 use simulation::{Body, SolarSystem};
 
-// TODO: Create astronomical_unit_per_day velocity unit.
-const MPS_TO_AUPD: f64 = 86400. / 1.495_979_E11;
+#[cfg(test)]
+mod test;
 
 // The radius of the rendering volume in AU.
 const WORLD_RADIUS_AU: f32 = 100.;
@@ -90,7 +99,7 @@ struct Simulation {
 // World.
 impl Simulation {
     // The simulation time step size in seconds
-    const DT: f64 = 1800.; // half an hour
+    const DT: f64 = 30.; // half an hour
 
     // The Julian Date when the simulation begins (2023-01-01T00:00:00 UTC)
     const EPOCH_JD: f64 = 2_459_945.5;
@@ -99,7 +108,7 @@ impl Simulation {
         let mut visuals = HashMap::new();
 
         // Color has be scaled by 10 to take advantage of HDR and bloom effects
-        let sun_color = Color::srgb(9.922, 9.843, 8.275);
+        let sun_color = Color::from(10. * Srgba::rgb(0.9922, 0.9843, 0.8275));
 
         let mercury_color = Color::srgb_u8(0x1a, 0x1a, 0x1a);
         let venus_color = Color::srgb_u8(0xe6, 0xe6, 0xe6);
@@ -127,19 +136,18 @@ impl Simulation {
     }
 
     pub fn advance(&mut self) {
-        self.solar_system.advance_time(Self::DT);
+        self.solar_system.advance_time(Time::new::<minute>(Self::DT));
     }
 
     pub fn apsis_of(&self, body: Body) -> f32 {
-        // TODO: Try to eliminate Err
-        match self.solar_system.properties_of(body) {
-            Ok(props) => props.apsis().get::<astronomical_unit>() as f32,
-            Err(_) => 0.,
-        }
+        self.solar_system.properties_of(body).apsis().get::<astronomical_unit>() as f32
+    }
+
+    pub fn bodies(&self) -> HashSet<Body> {
+        self.solar_system.bodies()
     }
 
     pub fn color_of(&self, body: Body) -> &Color{
-        // TODO: Try to eliminate Err
         match self.body_visuals.get(&body) {
             Some(vis) => vis.color(),
             None => &Color::WHITE,
@@ -147,15 +155,10 @@ impl Simulation {
     }
 
     pub fn luminosity_of(&self, body: Body) -> f32 {
-        // TODO: Try to eliminate Err
-        match self.solar_system.properties_of(body) {
-            Ok(props) =>  props.luminosity().value as f32,
-            Err(_) => 0.,
-        }
+        self.solar_system.properties_of(body).luminosity().value as f32
     }
 
     pub fn name_of(&self, body: Body) -> String {
-        // TODO: Try to eliminate Err
         match self.body_visuals.get(&body) {
             Some(vis) => vis.name().clone(),
             None => String::from("unknown"),
@@ -163,32 +166,22 @@ impl Simulation {
     }
 
     pub fn position_of(&self, body: Body) -> Vec3 {
-        // TODO: Try to eliminate Err
-        match self.solar_system.position_of(body) {
-            Ok(pos) => Vec3::new(
-                f64::Length::new::<meter>(pos.x).get::<astronomical_unit>() as f32,
-                f64::Length::new::<meter>(pos.y).get::<astronomical_unit>() as f32,
-                f64::Length::new::<meter>(pos.z).get::<astronomical_unit>() as f32,
-            ),
-            Err(_) => Vec3::ZERO,
-        }
+        let pos = self.solar_system.position_of(body);
+        Vec3::new(
+            f64::Length::new::<meter>(pos.x).get::<astronomical_unit>() as f32,
+            f64::Length::new::<meter>(pos.y).get::<astronomical_unit>() as f32,
+            f64::Length::new::<meter>(pos.z).get::<astronomical_unit>() as f32,
+        )
     }
 
     pub fn radius_of(&self, body: Body) -> f32 {
-        match self.solar_system.properties_of(body) {
-            Ok(props) => props.radius().get::<astronomical_unit>() as f32,
-            Err(_) => 0.,
-        }
+        self.solar_system.properties_of(body).radius().get::<astronomical_unit>() as f32
     }
 
     pub fn velocity_of(&self, body: Body) -> Vec3 {
-        match self.solar_system.velocity_of(body) {
-            Ok(vel) => {
-                let world_vel = (vel * MPS_TO_AUPD).cast::<f32>();
-                Vec3::new(world_vel.x, world_vel.y, world_vel.z)
-            },
-            Err(_) => Vec3::ZERO,
-        }
+        let vel = self.solar_system.velocity_of(body);
+        let world_vel = (vel * MPS_TO_AUPD).cast::<f32>();
+        Vec3::new(world_vel.x, world_vel.y, world_vel.z)
     }
 }
 
@@ -246,18 +239,11 @@ impl BodyModel {
 
 // This adds the celestial bodies being watched to the bevy World.
 fn create_body_models(sim: Res<Simulation>, mut commands: Commands) {
-    for body in [
-        Body::Sun,
-        Body::Moon,
-        Body::Mercury,
-        Body::Venus,
-        Body::Mars,
-        Body::Jupiter,
-        Body::Saturn,
-        Body::Uranus,
-        Body::Neptune,
-    ] {
-        commands.spawn((body, BodyModel::new(&sim.position_of(body))));
+    for body in sim.bodies() {
+        match body {
+            Body::Earth => (),
+            _ => { commands.spawn((body, BodyModel::new(&sim.position_of(body)))); }
+        }
     }
 }
 
@@ -342,7 +328,6 @@ fn update_avatars(
 ) {
     for model in &bodies {
         if let Some(avatar) = model.avatar() {
-            // TODO: Handle query entity error
             if let Ok(mut transform) = transforms.get_mut(avatar) {
                 *transform = Transform::from_translation(*model.position());
             }

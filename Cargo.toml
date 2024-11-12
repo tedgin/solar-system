@@ -13,4 +13,5 @@ bevy = "0.14"
 bevy_framepace = "0.17"
 bevy_mod_billboard = "0.7"
 nalgebra = "0.33"
+strum = { version="0.26", features = ["derive"] }
 uom = "0.36"
